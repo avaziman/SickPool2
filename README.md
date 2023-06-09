@@ -1,0 +1,1 @@
+Pending scalable p2p mining pool
