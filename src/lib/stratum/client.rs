@@ -4,7 +4,7 @@ static EXTRA_NONCE_COUNTER : AtomicUsize = AtomicUsize::new(0);
 #[derive(Debug)]
 pub struct StratumClient {
     pub extra_nonce: usize,
-    pub authorized_workers: HashMap<String, usize>,
+    pub authorized_workers: HashSet<String>,
     pub submitted_shares : HashSet<u64>
 }
 
@@ -15,7 +15,7 @@ impl Default for StratumClient {
 
         StratumClient {
             extra_nonce,
-            authorized_workers: HashMap::new(),
+            authorized_workers: HashSet::new(),
             submitted_shares: HashSet::new()
         }
     }

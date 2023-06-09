@@ -11,11 +11,10 @@
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=SickPool2",
-                    "--package=SickPool2"
+                    "--bin=sickpool2",
                 ],
                 "filter": {
-                    "name": "SickPool2",
+                    "name": "sickpool2",
                     "kind": "bin"
                 }
             },

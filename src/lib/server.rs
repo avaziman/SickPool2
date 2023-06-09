@@ -1,8 +1,11 @@
+use bitcoincore_rpc::bitcoin::secp256k1::Context;
+use io_arc::IoArc;
 use log::{info, warn};
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use slab;
@@ -22,11 +25,20 @@ pub struct Server<T: Default + std::fmt::Debug> {
 
 #[derive(Debug)]
 /* pub */
-struct Connection<T: Default + std::fmt::Debug> {
+pub struct Connection<T: Default + std::fmt::Debug> {
     addr: SocketAddr,
-    reader: BufReader<TcpStream>,
-    protocol_context: T,
+    stream: IoArc<TcpStream>,
+    reader: BufReader<IoArc<TcpStream>>,
+    protocol_context: Arc<Mutex<T>>,
 }
+
+pub fn respond(mut stream: IoArc<TcpStream>, msg: &str) {
+    // self.add_client_context(token, t);
+    if let Err(e) = stream.write_all(msg.as_bytes()) {
+        warn!("error responding: {}", e);
+    }
+}
+
 
 // all pools are edge triggered
 impl<T: Default + std::fmt::Debug> Server<T> {
@@ -50,34 +62,17 @@ impl<T: Default + std::fmt::Debug> Server<T> {
 
     // also closes the underlying stream
     pub fn disconnect(&mut self, token: Token) {
-        let conn = self.get_connnection(token);
-        info!("Disconnecting connection: {:?}", conn);
-        self.connections.remove(token.0);
-    }
-
-    fn get_connnection(&self, token: Token) -> &Connection<T> {
-        &self.connections[token.0]
-    }
-
-    fn get_connnection_mut(&mut self, token: Token) -> &mut Connection<T> {
-        &mut self.connections[token.0]
-    }
-
-    pub fn respond(&mut self, token: Token, msg: &str) {
-        if let Err(e) = self
-            .get_connnection_mut(token)
-            .reader
-            .get_ref()
-            .write(msg.as_bytes())
-        {
-            eprintln!("error responding: {}", e);
-        }
+        let cn = self.connections.remove(token.0);
+        info!("Disconnecting connection: {:?}", cn);
     }
 
     fn accept_connection(&mut self) -> Option<Token> {
         match self.listener.accept() {
             Ok((mut stream, addr)) => {
-                let token = Token(self.connections.vacant_key());
+                let cns = &mut self.connections;
+                let vacant_entry = cns.vacant_entry();
+                let token = Token(vacant_entry.key());
+                let key = vacant_entry.key();
 
                 if let Err(e) =
                     self.poll
@@ -93,13 +88,16 @@ impl<T: Default + std::fmt::Debug> Server<T> {
                     return None;
                 }
 
-                self.connections.insert(Connection {
+                let stream = IoArc::new(stream);
+
+                let con = vacant_entry.insert(Connection {
                     addr,
-                    reader: BufReader::with_capacity(BUFF_CAPACITY, stream),
-                    protocol_context: T::default(),
+                    reader: BufReader::with_capacity(BUFF_CAPACITY, stream.clone()),
+                    protocol_context: Arc::new(Mutex::new(T::default())),
+                    stream,
                 });
 
-                info!("Accepted connection: {:?}", self.get_connnection(token));
+                info!("Accepted connection (token: {}): {:?}", key, con);
 
                 Some(token)
             }
@@ -111,9 +109,15 @@ impl<T: Default + std::fmt::Debug> Server<T> {
     }
 
     // (requests, new connections, removed_connections)
-    pub fn get_requests(&mut self) -> (Vec<(String, Token, T)>, Vec<Token>, Vec<Token>) {
+    pub fn read_requests(
+        &mut self,
+    ) -> (
+        Vec<(String, IoArc<TcpStream>, Arc<Mutex<T>>)>,
+        Vec<Token>,
+        Vec<Token>,
+    ) {
         let mut events = Events::with_capacity(128);
-        let mut lines = Vec::<(String, Token, T)>::with_capacity(128);
+        let mut lines = Vec::<_>::with_capacity(128);
         let mut new_cons = Vec::new();
         let mut to_remove_cons: Vec<Token> = Vec::new();
 
@@ -127,21 +131,20 @@ impl<T: Default + std::fmt::Debug> Server<T> {
 
         for event in events.iter() {
             let token = event.token();
+
             if token == self.token {
                 if let Some(token_conn) = self.accept_connection().take() {
                     new_cons.push(token_conn)
                 }
                 continue;
             }
-
             if event.is_readable() {
                 loop {
                     match self.read_ready_line(token, &mut to_remove_cons).take() {
-                        Some(line) => lines.push((
-                            line,
-                            token,
-                            self.connections.remove(token.0).protocol_context,
-                        )),
+                        Some(line) => {
+                            let connection = &self.connections[token.0];
+                            lines.push((line, connection.stream.clone(), connection.protocol_context.clone()))
+                        }
                         None => break,
                     }
                 }
@@ -156,7 +159,7 @@ impl<T: Default + std::fmt::Debug> Server<T> {
     }
 
     fn read_ready_line(&mut self, token: Token, to_remove: &mut Vec<Token>) -> Option<String> {
-        let conn = self.get_connnection_mut(token);
+        let conn = &mut self.connections[token.0];
 
         let mut line = String::new();
         match conn.reader.read_line(&mut line) {

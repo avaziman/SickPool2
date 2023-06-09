@@ -1,44 +1,72 @@
-use std::{net::SocketAddr};
+use std::{io::Write, net::SocketAddr, sync::Arc, time::Instant};
 
 use crate::{
     protocol::Protocol,
-    server::{Server},
+    server::{self, Connection, Server},
 };
 use log::{error, info, warn};
+use mio::Token;
+use threadpool::ThreadPool;
 
-pub struct ProtocolServer<P: Protocol> {
+pub struct ProtocolServer<P: Protocol + Send + Sync> {
     server: Server<P::ClientContext>,
-    protocol: P,
+    protocol: Arc<P>,
+    tpool: ThreadPool,
 }
 
-impl<P: Protocol<Request = String, Response = String>> ProtocolServer<P> {
+impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> ProtocolServer<P> {
     pub fn new(addr: SocketAddr, protocol_conf: P::Config) -> Self {
         ProtocolServer {
             server: Server::new(addr),
-            protocol: P::new(protocol_conf),
+            protocol: Arc::new(P::new(protocol_conf)),
+            tpool: threadpool::Builder::new()
+                .num_threads(8)
+                .thread_stack_size(8_000_000)
+                .thread_name("Server processing thread".into())
+                .build(),
         }
     }
 
     pub fn process_requests(&mut self) {
-        let (requests, new_conns, remove_conns) = self.server.get_requests();
-        // first priority to process requests, then new connects and disconnects
-        for (req, token, ctx) in requests {
-            info!("Received request: {:?}", req);
-            let stratum_resp = self.protocol.process_request(req);
-            self.server.respond(token, stratum_resp.as_ref());
-            info!("Responded: {:?}", stratum_resp);
+        let requests = self.server.read_requests().0;
+        for (req, writer, ctx) in requests.into_iter() {
+
+            let protocol: Arc<P> = self.protocol.clone();
+            self.tpool.execute(move || {
+                let mut ptx = P::ProcessingContext::default();
+                info!("Received request: {:?}", req);
+                let now = Instant::now();
+
+                let stratum_resp = protocol.process_request(req, &mut ptx);
+                
+                let elapsed = now.elapsed().as_micros();
+                server::respond(writer, stratum_resp.as_ref());
+
+                info!("Processed response: {:?}, in {}us", stratum_resp, elapsed);
+            });
         }
-
-        // CLEANUP
-        // for new_conn in new_conns {
-        //     self.clients.insert(StratumClient::new());
-        // }
-
-        // for remove_conn in remove_conns {
-        //     self.clients.remove(remove_conn.0);
-        // }
-        // TODO, remove problem
     }
+
+    // pub fn process_requests(&mut self) {
+    //     let (requests, new_conns, remove_conns) = self.server.get_requests();
+    //     // first priority to process requests, then new connects and disconnects
+    //     for (req, token, ctx) in requests {
+    //         info!("Received request: {:?}", req);
+    //         let stratum_resp = self.protocol.process_request(req);
+    //         self.server.respond(token, stratum_resp.as_ref());
+    //         info!("Responded: {:?}", stratum_resp);
+    //     }
+
+    //     // CLEANUP
+    //     // for new_conn in new_conns {
+    //     //     self.clients.insert(StratumClient::new());
+    //     // }
+
+    //     // for remove_conn in remove_conns {
+    //     //     self.clients.remove(remove_conn.0);
+    //     // }
+    //     // TODO, remove problem
+    // }
 
     // fn process_request(
     //     &mut self,
@@ -89,7 +117,9 @@ pub mod tests {
         assert_eq!(result.method, String::from("mining.submit"));
         assert_eq!(result.jsonrpc, None);
 
-        let stratum_req = StratumV1::<bitcoincore_rpc::Client>::parse_stratum_req(result.method, result.params).unwrap();
+        let stratum_req =
+            StratumV1::<bitcoincore_rpc::Client>::parse_stratum_req(result.method, result.params)
+                .unwrap();
 
         assert_eq!(
             stratum_req,

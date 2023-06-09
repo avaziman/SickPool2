@@ -379,6 +379,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "futures-io"
+version = "0.3.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fff74096e71ed47f8e023204cfd0aa1289cd54ae5430a9523be060cdb849964"
+
+[[package]]
 name = "getrandom"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -475,6 +481,15 @@ dependencies = [
  "autocfg",
  "hashbrown",
  "serde",
+]
+
+[[package]]
+name = "io-arc"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "488b94a404af90b5d42ceec00cdeb0bc0738cf07e65ca433ee0a3353ece932ce"
+dependencies = [
+ "futures-io",
 ]
 
 [[package]]
@@ -983,6 +998,7 @@ dependencies = [
  "assert-impl",
  "bitcoincore-rpc",
  "criterion",
+ "io-arc",
  "itertools",
  "log",
  "log4rs",
@@ -993,6 +1009,7 @@ dependencies = [
  "serde_tuple",
  "serde_with",
  "slab",
+ "threadpool",
 ]
 
 [[package]]
@@ -1082,6 +1099,15 @@ dependencies = [
  "libc",
  "redox_syscall",
  "winapi",
+]
+
+[[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
 ]
 
 [[package]]

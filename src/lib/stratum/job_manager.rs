@@ -25,37 +25,29 @@ impl<RpcClient: HeaderFetcher> JobManager<RpcClient> {
             Err(e) => panic!("Failed to generate 1st job: {}", e),
         }
 
-        JobManager {
-            job_count: jobs.len() as u32,
-            jobs,
-        }
+        JobManager { job_count: 1, jobs }
     }
 
-    pub fn get_new_job(&mut self, header_fetcher: &RpcClient) -> Result<&Job<RpcClient::HeaderT>, RpcClient::ErrorT> {
-        let header = header_fetcher.fetch_header()?; 
+    pub fn get_new_job(
+        &mut self,
+        header_fetcher: &RpcClient,
+    ) -> Result<&Job<RpcClient::HeaderT>, RpcClient::ErrorT> {
+        let header = header_fetcher.fetch_header()?;
 
         let job = Job::new(self.job_count, header);
         self.job_count += 1;
         // info!("New job: {:#?}", job);
         let id = job.id;
         self.jobs.insert(job.id, job);
-        
+
         Ok(self.jobs.get(&id).unwrap())
     }
 
-    pub fn update_job(
-        &mut self,
-        params: &<RpcClient::HeaderT as BlockHeader>::SubmitParams,
-        job_id: u32,
-    ) -> Option<&Job<RpcClient::HeaderT>> {
-        let job = self.jobs.get_mut(&job_id);
+    pub fn get_job_count(&self) -> u32{
+        self.job_count
+    }
 
-        match job {
-            Some(job) => {
-                job.header.update_fields(params);
-                Some(&*job)
-            }
-            None => None,
-        }
+    pub fn get_jobs(&self) -> HashMap<u32, Job<RpcClient::HeaderT>>{
+        self.jobs.clone()
     }
 }

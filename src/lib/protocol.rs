@@ -1,3 +1,4 @@
+use log::warn;
 use serde_json::Value;
 
 use crate::{
@@ -10,9 +11,14 @@ pub trait Protocol {
     type Response;
     type Config;
     type ClientContext: Default + std::fmt::Debug;
+    type ProcessingContext: Default;
 
     fn new(conf: Self::Config) -> Self;
-    fn process_request(&mut self, req: Self::Request) -> Self::Response;
+    fn process_request(
+        &self,
+        req: Self::Request,
+        ptx: &mut Self::ProcessingContext,
+    ) -> Self::Response;
 }
 pub struct JsonRpcProtocol<UP, E>
 where
@@ -34,27 +40,34 @@ where
     type Response = String;
     type Config = UP::Config;
     type ClientContext = UP::ClientContext;
+    // cloned per processing thread
+    type ProcessingContext = UP::ProcessingContext;
 
     fn new(conf: Self::Config) -> Self {
         Self { up: UP::new(conf) }
     }
 
-    fn process_request(&mut self, req: Self::Request) -> Self::Response {
+    fn process_request(
+        &self,
+        req: Self::Request,
+        ptx: &mut Self::ProcessingContext,
+    ) -> Self::Response {
         serde_json::to_string(&match Self::parse_request(&req) {
             Ok(rpc_request) => RpcResponse::new(
                 rpc_request.id,
                 self.up
-                    .process_request((rpc_request.method, rpc_request.params)),
+                    .process_request((rpc_request.method, rpc_request.params), ptx),
             ),
             Err(e) => {
-                eprintln!("Failed to parse request: {}", e);
+                warn!("Failed to parse request: {}", e);
                 RpcResponse {
                     id: None,
                     res_or_err: ResultOrErr::Error((0, String::from("Bad JSON RPC request"), None)),
                 }
             }
         })
-        .unwrap() + "\n"
+        .unwrap()
+            + "\n"
     }
 }
 
@@ -64,7 +77,7 @@ where
     E: std::fmt::Display + Discriminant,
 {
     #[doc(hidden)]
-    pub/* (crate) */ fn parse_request(req: &String) -> Result<RpcRequest, serde_json::Error>{
+    pub fn parse_request(req: &String) -> Result<RpcRequest, serde_json::Error> {
         serde_json::from_str::<RpcRequest>(req)
     }
 }
