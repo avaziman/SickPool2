@@ -2,11 +2,12 @@ use std::{net::{IpAddr, SocketAddr}, collections::HashMap};
 use itertools::Itertools;
 
 const DEFAULT_PORT : u16 = 9001;
-/// The Data plane fanout size, also used as the neighborhood size
-pub const DATA_PLANE_FANOUT: usize = 200;
 
+#[derive(Debug, Default)]
 pub struct Peer {
     pub address: IpAddr,
+    // acknowledged version
+    pub successfully_connected: bool,
 }
 
 // pub struct RetransmitPeers {

@@ -37,6 +37,7 @@ impl<RpcClient: HeaderFetcher> JobManager<RpcClient> {
         let job = Job::new(self.job_count, header);
         self.job_count += 1;
         // info!("New job: {:#?}", job);
+
         let id = job.id;
         self.jobs.insert(job.id, job);
 

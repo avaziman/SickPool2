@@ -1,11 +1,11 @@
-use bitcoincore_rpc::{bitcoin::Target};
+use primitive_types::U256;
 
 use super::job_btc::BlockHeader;
 #[derive(Debug, Clone)]
 pub struct Job<T: BlockHeader + Clone, IdT = u32> {
     pub id: IdT,
     pub header: T,
-    pub target: Target,
+    pub target: U256,
 }
 
 impl<T: BlockHeader + Clone> Job<T, u32> {

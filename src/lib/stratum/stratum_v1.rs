@@ -1,7 +1,11 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use bitcoincore_rpc::bitcoin::{self, Target};
 use log::info;
+use primitive_types::U256;
 use serde_json::Value;
 
 use crate::{protocol::Protocol, sickrpc::RpcReqBody};
@@ -22,27 +26,6 @@ pub struct StratumV1<T: HeaderFetcher> {
     // job_manager: JobManager::new(RpcClient::new(config.rpc_url.as_ref())),
 }
 
-// pub struct BaseHandler<T: HeaderFetcher> {
-//     job_manager: JobManager<T>,
-// }
-
-// impl<T> StratumProtocolHandler for StratumV1<T>
-// where
-//     T: HeaderFetcher<HeaderT = bitcoin::block::Header>,
-// {
-//     fn new(job_manager: JobManager<Self::CompatibleClient>) -> Self {
-//         StratumV1 { job_manager }
-//     }
-
-//     fn process_request(
-//         &mut self,
-//         request: Self::Request,
-//     ) -> Self::Response
-//     {
-//         RpcResponse::new(request.id, self.process_stratum_request(request.stratum_request))
-//     }
-// }
-
 impl<T> StratumV1<T>
 where
     T: HeaderFetcher<HeaderT = bitcoin::block::Header>,
@@ -50,10 +33,11 @@ where
     pub fn process_stratum_request(
         &self,
         req: StratumRequestsBtc,
+        ctx: Arc<Mutex<StratumClient>>,
         ptx: &mut StratumProcessingContext<T>,
     ) -> Result<Value, StratumV1ErrorCodes> {
         match req {
-            StratumRequestsBtc::Submit(req) => self.process_submit(req, ptx),
+            StratumRequestsBtc::Submit(req) => self.process_submit(req, ctx, ptx),
             StratumRequestsBtc::Authorize(_) => Ok(Value::Bool(true)),
         }
     }
@@ -61,6 +45,7 @@ where
     fn process_submit(
         &self,
         params: SubmitReqParams,
+        ctx: Arc<Mutex<StratumClient>>,
         ptx: &mut StratumProcessingContext<T>,
     ) -> Result<Value, StratumV1ErrorCodes> {
         if !ptx.jobs.contains_key(&self.job_manager.get_job_count()) {
@@ -76,10 +61,12 @@ where
         };
 
         let hash = job.header.get_hash();
-        let hash_target = Target::from_le_bytes(hash);
-        info!("Hash {}", hash_target.difficulty_float());
-
+        let hash_target = U256::from(hash);
+        info!("Hash {}", hash_target);
+        
         if hash_target >= job.target {
+            Ok(Value::Bool(true))
+        } else if hash_target >= ctx.lock().unwrap().difficulty {
             Ok(Value::Bool(true))
         } else {
             Err(StratumV1ErrorCodes::LowDifficultyShare)
@@ -139,10 +126,11 @@ where
     fn process_request(
         &self,
         req: Self::Request,
+        ctx: Arc<Mutex<Self::ClientContext>>,
         ptx: &mut Self::ProcessingContext,
     ) -> Self::Response {
         match Self::parse_stratum_req(req.0, req.1) {
-            Ok(stratum_req) => self.process_stratum_request(stratum_req, ptx),
+            Ok(stratum_req) => self.process_stratum_request(stratum_req, ctx, ptx),
             Err(e) => {
                 return Err(StratumV1ErrorCodes::Unknown(String::from(format!(
                     "Failed to parse request: {}",

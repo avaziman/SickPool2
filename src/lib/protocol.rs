@@ -1,3 +1,8 @@
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
+
 use log::warn;
 use serde_json::Value;
 
@@ -10,15 +15,22 @@ pub trait Protocol {
     type Request: std::fmt::Debug;
     type Response;
     type Config;
-    type ClientContext: Default + std::fmt::Debug;
+    type ClientContext: Default + std::fmt::Debug + Sync + Send;
     type ProcessingContext: Default;
 
     fn new(conf: Self::Config) -> Self;
     fn process_request(
         &self,
         req: Self::Request,
+        ctx: Arc<Mutex<Self::ClientContext>>,
         ptx: &mut Self::ProcessingContext,
     ) -> Self::Response;
+
+    // tells the server who to connect to at bootstrap
+    // relevant for p2p protocol only for now
+    fn peers_to_connect(&self) -> Vec<SocketAddr> {
+        Vec::new()
+    }
 }
 pub struct JsonRpcProtocol<UP, E>
 where
@@ -50,13 +62,14 @@ where
     fn process_request(
         &self,
         req: Self::Request,
+        ctx: Arc<Mutex<Self::ClientContext>>,
         ptx: &mut Self::ProcessingContext,
     ) -> Self::Response {
         serde_json::to_string(&match Self::parse_request(&req) {
             Ok(rpc_request) => RpcResponse::new(
                 rpc_request.id,
                 self.up
-                    .process_request((rpc_request.method, rpc_request.params), ptx),
+                    .process_request((rpc_request.method, rpc_request.params), ctx, ptx),
             ),
             Err(e) => {
                 warn!("Failed to parse request: {}", e);

@@ -39,7 +39,6 @@ pub fn respond(mut stream: IoArc<TcpStream>, msg: &str) {
     }
 }
 
-
 // all pools are edge triggered
 impl<T: Default + std::fmt::Debug> Server<T> {
     pub fn new(saddr: SocketAddr) -> Server<T> {
@@ -50,7 +49,7 @@ impl<T: Default + std::fmt::Debug> Server<T> {
             .register(&mut listener, SERVER_TOKEN, Interest::READABLE)
             .unwrap();
 
-        info!("Started server on {}", saddr);
+        info!("Started server on {:?}", saddr);
 
         Server {
             listener,
@@ -68,44 +67,45 @@ impl<T: Default + std::fmt::Debug> Server<T> {
 
     fn accept_connection(&mut self) -> Option<Token> {
         match self.listener.accept() {
-            Ok((mut stream, addr)) => {
-                let cns = &mut self.connections;
-                let vacant_entry = cns.vacant_entry();
-                let token = Token(vacant_entry.key());
-                let key = vacant_entry.key();
-
-                if let Err(e) =
-                    self.poll
-                        .registry()
-                        .register(&mut stream, token, Interest::READABLE)
-                {
-                    warn!(
-                        "Error registering stream: {:?} -> {}, dropping...",
-                        stream, e
-                    );
-
-                    // stream is dropped
-                    return None;
-                }
-
-                let stream = IoArc::new(stream);
-
-                let con = vacant_entry.insert(Connection {
-                    addr,
-                    reader: BufReader::with_capacity(BUFF_CAPACITY, stream.clone()),
-                    protocol_context: Arc::new(Mutex::new(T::default())),
-                    stream,
-                });
-
-                info!("Accepted connection (token: {}): {:?}", key, con);
-
-                Some(token)
-            }
+            Ok((mut stream, addr)) => self.add_connection(stream, addr),
             Err(e) => {
                 warn!("Error accepting connection: {}", e);
                 None
             }
         }
+    }
+
+    fn add_connection(&mut self, mut stream: TcpStream, addr: SocketAddr) -> Option<Token> {
+        let cns = &mut self.connections;
+        let vacant_entry = cns.vacant_entry();
+        let token = Token(vacant_entry.key());
+        let key = vacant_entry.key();
+
+        if let Err(e) = self
+            .poll
+            .registry()
+            .register(&mut stream, token, Interest::READABLE)
+        {
+            warn!(
+                "Error registering stream: {:?} -> {}, dropping...",
+                stream, e
+            );
+
+            // stream is dropped
+            return None;
+        }
+
+        let stream = IoArc::new(stream);
+
+        let con = vacant_entry.insert(Connection {
+            addr,
+            reader: BufReader::with_capacity(BUFF_CAPACITY, stream.clone()),
+            protocol_context: Arc::new(Mutex::new(T::default())),
+            stream,
+        });
+
+        info!("Accepted connection (token: {}): {:?}", key, con);
+        Some(token)
     }
 
     // (requests, new connections, removed_connections)
@@ -119,14 +119,14 @@ impl<T: Default + std::fmt::Debug> Server<T> {
         let mut events = Events::with_capacity(128);
         let mut lines = Vec::<_>::with_capacity(128);
         let mut new_cons = Vec::new();
-        let mut to_remove_cons: Vec<Token> = Vec::new();
+        let mut removed_cons: Vec<Token> = Vec::new();
 
         if let Err(e) = self
             .poll
             .poll(&mut events, Some(Duration::from_secs(TIMEOUT_SEC)))
         {
             warn!("Error polling: {}", e);
-            return (lines, new_cons, to_remove_cons);
+            return (lines, new_cons, removed_cons);
         }
 
         for event in events.iter() {
@@ -140,10 +140,14 @@ impl<T: Default + std::fmt::Debug> Server<T> {
             }
             if event.is_readable() {
                 loop {
-                    match self.read_ready_line(token, &mut to_remove_cons).take() {
+                    match self.read_ready_line(token, &mut removed_cons).take() {
                         Some(line) => {
                             let connection = &self.connections[token.0];
-                            lines.push((line, connection.stream.clone(), connection.protocol_context.clone()))
+                            lines.push((
+                                line,
+                                connection.stream.clone(),
+                                connection.protocol_context.clone(),
+                            ))
                         }
                         None => break,
                     }
@@ -151,11 +155,23 @@ impl<T: Default + std::fmt::Debug> Server<T> {
             }
         }
 
-        for to_remove in &to_remove_cons {
+        for to_remove in &removed_cons {
             self.disconnect(*to_remove);
         }
 
-        (lines, new_cons, to_remove_cons)
+        (lines, new_cons, removed_cons)
+    }
+
+    pub fn connect(&mut self, addr: SocketAddr) -> Option<Token> {
+        info!("Connecting to {}...", addr);
+
+        match TcpStream::connect(addr) {
+            Ok(stream) => self.add_connection(stream, addr),
+            Err(e) => {
+                warn!("Failed to connect to: {} -> {}", addr, e);
+                None
+            }
+        }
     }
 
     fn read_ready_line(&mut self, token: Token, to_remove: &mut Vec<Token>) -> Option<String> {

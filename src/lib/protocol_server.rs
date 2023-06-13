@@ -16,46 +16,45 @@ pub struct ProtocolServer<P: Protocol + Send + Sync> {
 
 impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> ProtocolServer<P> {
     pub fn new(addr: SocketAddr, protocol_conf: P::Config) -> Self {
-        ProtocolServer {
+        let mut server = ProtocolServer {
             server: Server::new(addr),
             protocol: Arc::new(P::new(protocol_conf)),
             tpool: threadpool::Builder::new()
                 .num_threads(8)
                 .thread_stack_size(8_000_000)
-                .thread_name("Server processing thread".into())
+                .thread_name("Server protocol processing thread".into())
                 .build(),
+        };
+        for peer in server.protocol.peers_to_connect() {
+            server.server.connect(peer);
         }
+        server
     }
 
     pub fn process_requests(&mut self) {
-        let requests = self.server.read_requests().0;
+        let (requests, new_cons, rem_cons) = self.server.read_requests();
         for (req, writer, ctx) in requests.into_iter() {
-
             let protocol: Arc<P> = self.protocol.clone();
             self.tpool.execute(move || {
                 let mut ptx = P::ProcessingContext::default();
                 info!("Received request: {:?}", req);
                 let now = Instant::now();
 
-                let stratum_resp = protocol.process_request(req, &mut ptx);
-                
+                let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
+
                 let elapsed = now.elapsed().as_micros();
                 server::respond(writer, stratum_resp.as_ref());
 
                 info!("Processed response: {:?}, in {}us", stratum_resp, elapsed);
             });
         }
-    }
 
-    // pub fn process_requests(&mut self) {
-    //     let (requests, new_conns, remove_conns) = self.server.get_requests();
-    //     // first priority to process requests, then new connects and disconnects
-    //     for (req, token, ctx) in requests {
-    //         info!("Received request: {:?}", req);
-    //         let stratum_resp = self.protocol.process_request(req);
-    //         self.server.respond(token, stratum_resp.as_ref());
-    //         info!("Responded: {:?}", stratum_resp);
-    //     }
+        if !rem_cons.is_empty() {
+            for peer in self.protocol.peers_to_connect() {
+                self.server.connect(peer);
+            }
+        }
+    }
 
     //     // CLEANUP
     //     // for new_conn in new_conns {
@@ -66,21 +65,6 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> P
     //     //     self.clients.remove(remove_conn.0);
     //     // }
     //     // TODO, remove problem
-    // }
-
-    // fn process_request(
-    //     &mut self,
-    //     req: SH::Request,
-    //     token: Token,
-    // ) -> String {
-    //     // let client = match self.clients.get_mut(token.0) {
-    //     //     Some(client) => client,
-    //     //     None => {
-    //     //         error!("Missing client with token {}", token.0);
-    //     //         return Err(StratumV1ErrorCodes::Unknown);
-    //     //     }
-    //     // };
-    //     self.stratum_handler.process_request(req).to_string()
     // }
 }
 

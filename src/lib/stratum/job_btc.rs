@@ -3,6 +3,7 @@ use bitcoincore_rpc::bitcoin::hash_types::TxMerkleNode;
 use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::bitcoin::{BlockHash, CompactTarget, Target};
 use bitcoincore_rpc::json::GetBlockTemplateResult;
+use primitive_types::U256;
 
 use super::protocol::SubmitReqParams;
 
@@ -12,8 +13,8 @@ pub trait BlockHeader {
     type SubmitParams;
 
     fn from_block_template(template: &Self::BlockTemplateT) -> Self;
-    fn get_hash(&self) -> [u8; 32];
-    fn get_target(&self) -> Target;
+    fn get_hash(&self) -> U256;
+    fn get_target(&self) -> U256;
     fn update_fields(&mut self, params: &Self::SubmitParams);
 }
 
@@ -39,11 +40,11 @@ impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
         self.nonce = params.nonce;
     }
 
-    fn get_hash(&self) -> [u8; 32] {
-        self.block_hash().to_byte_array()
+    fn get_hash(&self) -> U256 {
+        U256::from(self.block_hash().to_byte_array())
     }
 
-    fn get_target(&self) -> Target {
-        Target::from_compact(self.bits)
+    fn get_target(&self) -> U256 {
+        U256::from(Target::from_compact(self.bits).to_le_bytes())
     }
 }
