@@ -1,13 +1,17 @@
 use std::{
     collections::{HashMap, VecDeque},
     fs,
+    net::IpAddr,
     sync::{Arc, Mutex},
 };
 
 use bitcoincore_rpc::bitcoin::secp256k1::Message;
+use io_arc::IoArc;
 use log::{info, warn};
+use mio::net::TcpStream;
 use primitive_types::U256;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::net::SocketAddr;
 
 use crate::{protocol::Protocol, stratum::job_btc::BlockHeader};
 
@@ -127,7 +131,7 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
     fn new(conf: Self::Config) -> Self {
         Self {
             state: State::new(),
-            conf
+            conf,
         }
     }
 
@@ -138,7 +142,6 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
             .map(|s| s.parse().expect("Invalid peers"))
             .collect();
 
-        
         // while (peers.len() as u32) < conf.peer_connections {
         //     info!("Discovering peers...");
         // }
@@ -162,6 +165,13 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
             .unwrap(),
         )
         .unwrap()
+    }
+
+    fn create_client(&self, address: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext {
+        Self::ClientContext {
+            address,
+            successfully_connected: false,
+        }
     }
 }
 

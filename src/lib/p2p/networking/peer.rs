@@ -3,9 +3,9 @@ use itertools::Itertools;
 
 const DEFAULT_PORT : u16 = 9001;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Peer {
-    pub address: IpAddr,
+    pub address: SocketAddr,
     // acknowledged version
     pub successfully_connected: bool,
 }

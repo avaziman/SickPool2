@@ -31,8 +31,13 @@ impl<RpcClient: HeaderFetcher> JobManager<RpcClient> {
     pub fn get_new_job(
         &mut self,
         header_fetcher: &RpcClient,
-    ) -> Result<&Job<RpcClient::HeaderT>, RpcClient::ErrorT> {
+    ) -> Result<Option<&Job<RpcClient::HeaderT>>, RpcClient::ErrorT> {
         let header = header_fetcher.fetch_header()?;
+
+        if header.equal(&self.jobs[&(self.job_count - 1)].header) {
+            return Ok(None);
+        }
+        
 
         let job = Job::new(self.job_count, header);
         self.job_count += 1;
@@ -41,7 +46,7 @@ impl<RpcClient: HeaderFetcher> JobManager<RpcClient> {
         let id = job.id;
         self.jobs.insert(job.id, job);
 
-        Ok(self.jobs.get(&id).unwrap())
+        Ok(Some(self.jobs.get(&id).unwrap()))
     }
 
     pub fn get_job_count(&self) -> u32{

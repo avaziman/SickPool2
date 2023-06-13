@@ -7,13 +7,10 @@ use serde_hex::*;
 use serde_tuple::Deserialize_tuple;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-// #[serde(tag = "method")]
 pub enum StratumRequestsBtc {
-    // #[serde(rename = "mining.submit")]
     Submit(SubmitReqParams),
-    // #[serde(rename = "mining.authorize")]
+    Subscribe,
     Authorize(AuthorizeReqParams),
-    // Unknown(String),
 }
 
 #[derive(Serialize, Deserialize_tuple, PartialEq, Debug)]

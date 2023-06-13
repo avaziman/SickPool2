@@ -1,10 +1,17 @@
 use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    thread,
 };
 
 use bitcoincore_rpc::bitcoin::{self, Target};
+use io_arc::IoArc;
 use log::info;
+use mio::{net::TcpStream, Token};
 use primitive_types::U256;
 use serde_json::Value;
 
@@ -22,8 +29,10 @@ use super::{
 
 // original slush bitcoin stratum protocol
 pub struct StratumV1<T: HeaderFetcher> {
-    pub job_manager: JobManager<T>,
-    // job_manager: JobManager::new(RpcClient::new(config.rpc_url.as_ref())),
+    job_manager: Mutex<JobManager<T>>,
+    client_count: AtomicUsize,
+    pub subscribed_clients: Mutex<HashMap<Token, IoArc<TcpStream>>>,
+    pub daemon_cli: T,
 }
 
 impl<T> StratumV1<T>
@@ -38,6 +47,13 @@ where
     ) -> Result<Value, StratumV1ErrorCodes> {
         match req {
             StratumRequestsBtc::Submit(req) => self.process_submit(req, ctx, ptx),
+            StratumRequestsBtc::Subscribe => {
+                self.subscribed_clients
+                    .lock()
+                    .unwrap()
+                    .insert(Token(0), ctx.lock().unwrap().stream.clone());
+                Ok(Value::Bool(true))
+            }
             StratumRequestsBtc::Authorize(_) => Ok(Value::Bool(true)),
         }
     }
@@ -48,8 +64,11 @@ where
         ctx: Arc<Mutex<StratumClient>>,
         ptx: &mut StratumProcessingContext<T>,
     ) -> Result<Value, StratumV1ErrorCodes> {
-        if !ptx.jobs.contains_key(&self.job_manager.get_job_count()) {
-            ptx.jobs = self.job_manager.get_jobs()
+        if !ptx
+            .jobs
+            .contains_key(&self.job_manager.lock().unwrap().get_job_count())
+        {
+            ptx.jobs = self.job_manager.lock().unwrap().get_jobs()
         }
 
         let job = match ptx.jobs.get_mut(&params.job_id) {
@@ -63,7 +82,7 @@ where
         let hash = job.header.get_hash();
         let hash_target = U256::from(hash);
         info!("Hash {}", hash_target);
-        
+
         if hash_target >= job.target {
             Ok(Value::Bool(true))
         } else if hash_target >= ctx.lock().unwrap().difficulty {
@@ -82,11 +101,24 @@ where
             "mining.authorize" => Ok(StratumRequestsBtc::Authorize(serde_json::from_value(
                 params,
             )?)),
+            "mining.subscribe" => Ok(StratumRequestsBtc::Subscribe),
             unknown => Err(serde::de::Error::custom(format!(
                 "Unknown method: {}",
                 unknown
             ))),
         }
+    }
+
+    pub fn fetch_new_job(&self, header_fetcher: &T) -> bool {
+        let mut lock = self.job_manager.lock().unwrap();
+        let res = lock.get_new_job(header_fetcher);
+
+        if let Ok(r) = res {
+            if let Some(r) = r {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -118,8 +150,13 @@ where
     type ProcessingContext = StratumProcessingContext<T>;
 
     fn new(conf: Self::Config) -> Self {
+        let daemon_cli = T::new(conf.rpc_url.as_ref());
+
         StratumV1 {
-            job_manager: JobManager::new(&T::new(conf.rpc_url.as_ref())),
+            job_manager: Mutex::new(JobManager::new(&daemon_cli)),
+            client_count: AtomicUsize::new(0),
+            subscribed_clients: Mutex::new(HashMap::new()),
+            daemon_cli,
         }
     }
 
@@ -138,5 +175,11 @@ where
                 ))));
             }
         }
+    }
+
+    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext {
+        let id = self.client_count.load(Ordering::Relaxed);
+        self.client_count.store(id + 1, Ordering::Relaxed);
+        StratumClient::new(stream, id)
     }
 }

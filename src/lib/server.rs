@@ -6,9 +6,12 @@ use mio::{Events, Interest, Poll, Token};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use threadpool::ThreadPool;
 
 use slab;
+
+use crate::protocol::Protocol;
 type Slab<T> = slab::Slab<T>;
 
 const SERVER_TOKEN: Token = Token(usize::MAX);
@@ -16,16 +19,20 @@ const TIMEOUT_SEC: u64 = 5;
 const BUFF_CAPACITY: usize = 16 * 1024;
 const INITIAL_CLIENTS_CAPACITY: usize = 1024;
 
-pub struct Server<T: Default + std::fmt::Debug> {
+pub struct Server<P: Protocol + Send + Sync> {
     listener: TcpListener,
     token: Token,
     poll: Poll,
-    connections: Slab<Connection<T>>,
+    connections: Slab<Connection<P::ClientContext>>,
+    protocol: Arc<P>,
+    tpool: ThreadPool,
 }
 
 #[derive(Debug)]
 /* pub */
-pub struct Connection<T: Default + std::fmt::Debug> {
+pub struct Connection<T> {
+    // written: usize,
+    // responded: usize,
     addr: SocketAddr,
     stream: IoArc<TcpStream>,
     reader: BufReader<IoArc<TcpStream>>,
@@ -40,8 +47,8 @@ pub fn respond(mut stream: IoArc<TcpStream>, msg: &str) {
 }
 
 // all pools are edge triggered
-impl<T: Default + std::fmt::Debug> Server<T> {
-    pub fn new(saddr: SocketAddr) -> Server<T> {
+impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> Server<P> {
+    pub fn new(saddr: SocketAddr, protocol: Arc<P>) -> Server<P> {
         let mut listener = TcpListener::bind(saddr).unwrap();
         let poll = Poll::new().unwrap();
 
@@ -53,21 +60,59 @@ impl<T: Default + std::fmt::Debug> Server<T> {
 
         Server {
             listener,
+            protocol,
             token: SERVER_TOKEN,
             poll: poll,
             connections: Slab::with_capacity(INITIAL_CLIENTS_CAPACITY),
+            tpool: threadpool::Builder::new()
+                .num_threads(8)
+                .thread_stack_size(8_000_000)
+                .thread_name("Server protocol processing thread".into())
+                .build(),
         }
     }
 
+    pub fn process_requests(&mut self) {
+        let requests = self.read_requests();
+        for (req, writer, ctx) in requests.into_iter() {
+            let protocol: Arc<P> = self.protocol.clone();
+
+            self.tpool.execute(move || {
+                let mut ptx = P::ProcessingContext::default();
+                info!("Received request: {:?}", req);
+                let now = Instant::now();
+
+                let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
+
+                let elapsed = now.elapsed().as_micros();
+                respond(writer, stratum_resp.as_ref());
+
+                info!("Processed response: {:?}, in {}us", stratum_resp, elapsed);
+            });
+        }
+
+        // if !rem_cons.is_empty() {
+        //     for peer in self.protocol.peers_to_connect() {
+        //         self.server.connect(peer);
+        //     }
+        // }
+    }
+
     // also closes the underlying stream
-    pub fn disconnect(&mut self, token: Token) {
+    fn disconnect(&mut self, token: Token) {
         let cn = self.connections.remove(token.0);
         info!("Disconnecting connection: {:?}", cn);
     }
 
     fn accept_connection(&mut self) -> Option<Token> {
         match self.listener.accept() {
-            Ok((mut stream, addr)) => self.add_connection(stream, addr),
+            Ok((stream, addr)) => {
+                if let Err(e) = stream.set_nodelay(true) {
+                    warn!("Failed to set socket nodelay: {}", addr);
+                    return None;
+                }
+                self.add_connection(stream, addr)
+            }
             Err(e) => {
                 warn!("Error accepting connection: {}", e);
                 None
@@ -100,7 +145,9 @@ impl<T: Default + std::fmt::Debug> Server<T> {
         let con = vacant_entry.insert(Connection {
             addr,
             reader: BufReader::with_capacity(BUFF_CAPACITY, stream.clone()),
-            protocol_context: Arc::new(Mutex::new(T::default())),
+            protocol_context: Arc::new(Mutex::new(
+                self.protocol.create_client(addr, stream.clone()),
+            )),
             stream,
         });
 
@@ -111,11 +158,7 @@ impl<T: Default + std::fmt::Debug> Server<T> {
     // (requests, new connections, removed_connections)
     pub fn read_requests(
         &mut self,
-    ) -> (
-        Vec<(String, IoArc<TcpStream>, Arc<Mutex<T>>)>,
-        Vec<Token>,
-        Vec<Token>,
-    ) {
+    ) -> Vec<(String, IoArc<TcpStream>, Arc<Mutex<P::ClientContext>>)> {
         let mut events = Events::with_capacity(128);
         let mut lines = Vec::<_>::with_capacity(128);
         let mut new_cons = Vec::new();
@@ -126,7 +169,7 @@ impl<T: Default + std::fmt::Debug> Server<T> {
             .poll(&mut events, Some(Duration::from_secs(TIMEOUT_SEC)))
         {
             warn!("Error polling: {}", e);
-            return (lines, new_cons, removed_cons);
+            return lines;
         }
 
         for event in events.iter() {
@@ -159,7 +202,7 @@ impl<T: Default + std::fmt::Debug> Server<T> {
             self.disconnect(*to_remove);
         }
 
-        (lines, new_cons, removed_cons)
+        lines
     }
 
     pub fn connect(&mut self, addr: SocketAddr) -> Option<Token> {
@@ -173,6 +216,12 @@ impl<T: Default + std::fmt::Debug> Server<T> {
             }
         }
     }
+
+    // fn broadcast(&self, tokens: &[Token]) {
+    //     for token in tokens {
+    //         respond(self.connections[token.0]);
+    //     }
+    // }
 
     fn read_ready_line(&mut self, token: Token, to_remove: &mut Vec<Token>) -> Option<String> {
         let conn = &mut self.connections[token.0];
@@ -205,3 +254,5 @@ impl<T: Default + std::fmt::Debug> Server<T> {
         }
     }
 }
+
+// WHEN A NEW JOB COMES, processing threads need to first update their context, then we can notify the clients, shares that are being processed whilst the new job was received are acceptable

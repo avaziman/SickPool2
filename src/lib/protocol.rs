@@ -1,8 +1,9 @@
 use std::{
-    net::SocketAddr,
+    net::{SocketAddr, IpAddr},
     sync::{Arc, Mutex},
 };
-
+use mio::net::TcpStream;
+use io_arc::IoArc;
 use log::warn;
 use serde_json::Value;
 
@@ -15,7 +16,7 @@ pub trait Protocol {
     type Request: std::fmt::Debug;
     type Response;
     type Config;
-    type ClientContext: Default + std::fmt::Debug + Sync + Send;
+    type ClientContext: std::fmt::Debug + Sync + Send;
     type ProcessingContext: Default;
 
     fn new(conf: Self::Config) -> Self;
@@ -31,13 +32,16 @@ pub trait Protocol {
     fn peers_to_connect(&self) -> Vec<SocketAddr> {
         Vec::new()
     }
+
+    // TODO: MAKE OPTION, kick if none
+    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext;
 }
 pub struct JsonRpcProtocol<UP, E>
 where
     UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
     E: std::fmt::Display + Discriminant,
 {
-    up: UP,
+    pub up: UP, 
 }
 
 // UNDERLYING PROTOCOL
@@ -81,6 +85,11 @@ where
         })
         .unwrap()
             + "\n"
+    }
+
+    // perhaps save the format later... or smt
+    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext {
+        self.up.create_client(addr, stream)
     }
 }
 

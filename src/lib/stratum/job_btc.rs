@@ -8,7 +8,7 @@ use primitive_types::U256;
 use super::protocol::SubmitReqParams;
 
 
-pub trait BlockHeader {
+pub trait BlockHeader{
     type BlockTemplateT;
     type SubmitParams;
 
@@ -16,6 +16,7 @@ pub trait BlockHeader {
     fn get_hash(&self) -> U256;
     fn get_target(&self) -> U256;
     fn update_fields(&mut self, params: &Self::SubmitParams);
+    fn equal(&self, other: &Self) -> bool;
 }
 
 impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
@@ -47,4 +48,10 @@ impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
     fn get_target(&self) -> U256 {
         U256::from(Target::from_compact(self.bits).to_le_bytes())
     }
+
+    fn equal(&self, other: &Self) -> bool {
+        self.prev_blockhash == other.prev_blockhash
+    }
+
+    
 }
