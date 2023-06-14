@@ -5,6 +5,7 @@ use std::{net::SocketAddr, sync::Arc};
 use bitcoincore_rpc::bitcoin::block::Header;
 use log::info;
 
+use crate::config::ProtocolServerConfig;
 use crate::protocol::Protocol;
 use crate::server::respond;
 use crate::{protocol::JsonRpcProtocol, server::Server};
@@ -22,9 +23,9 @@ pub struct StratumServer<T: HeaderFetcher<HeaderT = Header> + Send + Sync> {
 }
 
 impl<T: HeaderFetcher<HeaderT = Header> + Send + Sync + 'static> StratumServer<T> {
-    pub fn new(saddr: SocketAddr, conf: StratumConfig) -> Self {
-        let job_poll_interval = conf.job_poll_interval;
-        let protocol = Arc::new(SProtocol::<T>::new(conf));
+    pub fn new(conf: ProtocolServerConfig<StratumConfig>) -> Self {
+        let job_poll_interval = conf.protocol_config.job_poll_interval;
+        let protocol = Arc::new(SProtocol::<T>::new(conf.protocol_config));
 
         let protocol_poll_cp = protocol.clone();
         thread::spawn(move || {
@@ -45,7 +46,7 @@ impl<T: HeaderFetcher<HeaderT = Header> + Send + Sync + 'static> StratumServer<T
 
         Self {
             protocol: protocol.clone(),
-            server: Server::new(saddr, protocol),
+            server: Server::new(conf.server_config, protocol),
         }
     }
 

@@ -1,14 +1,14 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     net::SocketAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
     },
     thread,
 };
 
-use bitcoincore_rpc::bitcoin::{self, Target};
+use bitcoincore_rpc::bitcoin::{self};
 use io_arc::IoArc;
 use log::info;
 use mio::{net::TcpStream, Token};
@@ -29,7 +29,7 @@ use super::{
 
 // original slush bitcoin stratum protocol
 pub struct StratumV1<T: HeaderFetcher> {
-    job_manager: Mutex<JobManager<T>>,
+    job_manager: RwLock<JobManager<T>>,
     client_count: AtomicUsize,
     pub subscribed_clients: Mutex<HashMap<Token, IoArc<TcpStream>>>,
     pub daemon_cli: T,
@@ -66,9 +66,9 @@ where
     ) -> Result<Value, StratumV1ErrorCodes> {
         if !ptx
             .jobs
-            .contains_key(&self.job_manager.lock().unwrap().get_job_count())
+            .contains_key(&self.job_manager.read().unwrap().get_job_count())
         {
-            ptx.jobs = self.job_manager.lock().unwrap().get_jobs()
+            ptx.jobs = self.job_manager.read().unwrap().get_jobs()
         }
 
         let job = match ptx.jobs.get_mut(&params.job_id) {
@@ -110,7 +110,7 @@ where
     }
 
     pub fn fetch_new_job(&self, header_fetcher: &T) -> bool {
-        let mut lock = self.job_manager.lock().unwrap();
+        let mut lock = self.job_manager.write().unwrap();
         let res = lock.get_new_job(header_fetcher);
 
         if let Ok(r) = res {
@@ -153,7 +153,7 @@ where
         let daemon_cli = T::new(conf.rpc_url.as_ref());
 
         StratumV1 {
-            job_manager: Mutex::new(JobManager::new(&daemon_cli)),
+            job_manager: RwLock::new(JobManager::new(&daemon_cli)),
             client_count: AtomicUsize::new(0),
             subscribed_clients: Mutex::new(HashMap::new()),
             daemon_cli,
@@ -169,17 +169,19 @@ where
         match Self::parse_stratum_req(req.0, req.1) {
             Ok(stratum_req) => self.process_stratum_request(stratum_req, ctx, ptx),
             Err(e) => {
-                return Err(StratumV1ErrorCodes::Unknown(String::from(format!(
+                return Err(StratumV1ErrorCodes::Unknown(format!(
                     "Failed to parse request: {}",
                     e
-                ))));
+                )));
             }
         }
     }
 
-    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext {
+    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Option<Self::ClientContext> {
         let id = self.client_count.load(Ordering::Relaxed);
         self.client_count.store(id + 1, Ordering::Relaxed);
-        StratumClient::new(stream, id)
+        Some(StratumClient::new(stream, id))
     }
 }
+
+// TODO REMOVE FROM SUBSCRIBED CLIETNS

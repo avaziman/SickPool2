@@ -1,16 +1,16 @@
-use bitcoincore_rpc::bitcoin::secp256k1::Context;
 use io_arc::IoArc;
 use log::{info, warn};
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use threadpool::ThreadPool;
 
 use slab;
 
+use crate::config::ServerConfig;
 use crate::protocol::Protocol;
 type Slab<T> = slab::Slab<T>;
 
@@ -21,6 +21,7 @@ const INITIAL_CLIENTS_CAPACITY: usize = 1024;
 
 pub struct Server<P: Protocol + Send + Sync> {
     listener: TcpListener,
+    pub conf: ServerConfig,
     token: Token,
     poll: Poll,
     connections: Slab<Connection<P::ClientContext>>,
@@ -28,7 +29,7 @@ pub struct Server<P: Protocol + Send + Sync> {
     tpool: ThreadPool,
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 /* pub */
 pub struct Connection<T> {
     // written: usize,
@@ -37,6 +38,12 @@ pub struct Connection<T> {
     stream: IoArc<TcpStream>,
     reader: BufReader<IoArc<TcpStream>>,
     protocol_context: Arc<Mutex<T>>,
+}
+
+impl<T> std::fmt::Display for Connection<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Connection address: {}", self.addr)
+    }
 }
 
 pub fn respond(mut stream: IoArc<TcpStream>, msg: &str) {
@@ -48,15 +55,15 @@ pub fn respond(mut stream: IoArc<TcpStream>, msg: &str) {
 
 // all pools are edge triggered
 impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> Server<P> {
-    pub fn new(saddr: SocketAddr, protocol: Arc<P>) -> Server<P> {
-        let mut listener = TcpListener::bind(saddr).unwrap();
+    pub fn new(conf: ServerConfig, protocol: Arc<P>) -> Server<P> {
+        let mut listener = TcpListener::bind(conf.address).unwrap();
         let poll = Poll::new().unwrap();
 
         poll.registry()
             .register(&mut listener, SERVER_TOKEN, Interest::READABLE)
             .unwrap();
 
-        info!("Started server on {:?}", saddr);
+        info!("Started server on {:?}", conf.address);
 
         Server {
             listener,
@@ -69,7 +76,21 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
                 .thread_stack_size(8_000_000)
                 .thread_name("Server protocol processing thread".into())
                 .build(),
+            conf,
         }
+    }
+
+    pub fn get_connection_count(&self) -> usize {
+        self.connections.len()
+    }
+
+    pub fn is_connected(&self, addr: SocketAddr) -> bool {
+        for (token, con) in &self.connections {
+            if con.addr == addr {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn process_requests(&mut self) {
@@ -101,7 +122,9 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
     // also closes the underlying stream
     fn disconnect(&mut self, token: Token) {
         let cn = self.connections.remove(token.0);
-        info!("Disconnecting connection: {:?}", cn);
+        info!("Disconnecting connection: {}", cn);
+
+        self.protocol.delete_client(cn.addr, cn.protocol_context);
     }
 
     fn accept_connection(&mut self) -> Option<Token> {
@@ -142,16 +165,21 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
 
         let stream = IoArc::new(stream);
 
+        let ctx = match self.protocol.create_client(addr, stream.clone()) {
+            Some(k) => k,
+            None => {
+                return None;
+            }
+        };
+
         let con = vacant_entry.insert(Connection {
             addr,
             reader: BufReader::with_capacity(BUFF_CAPACITY, stream.clone()),
-            protocol_context: Arc::new(Mutex::new(
-                self.protocol.create_client(addr, stream.clone()),
-            )),
+            protocol_context: Arc::new(Mutex::new(ctx)),
             stream,
         });
 
-        info!("Accepted connection (token: {}): {:?}", key, con);
+        info!("Accepted connection (token: {}): {}", key, con);
         Some(token)
     }
 
@@ -230,7 +258,7 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
         match conn.reader.read_line(&mut line) {
             // disconnect. EOF
             Ok(0) => {
-                warn!("Client EOF: {:?}", &conn);
+                warn!("Client EOF: {}", &conn);
                 to_remove.push(token);
                 None
             }

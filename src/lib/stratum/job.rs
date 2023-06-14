@@ -2,7 +2,7 @@ use primitive_types::U256;
 
 use super::job_btc::BlockHeader;
 #[derive(Debug, Clone)]
-pub struct Job<T: BlockHeader + Clone, IdT = u32> {
+pub struct Job<T, IdT = u32> {
     pub id: IdT,
     pub header: T,
     pub target: U256,

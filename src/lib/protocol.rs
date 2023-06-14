@@ -27,21 +27,16 @@ pub trait Protocol {
         ptx: &mut Self::ProcessingContext,
     ) -> Self::Response;
 
-    // tells the server who to connect to at bootstrap
-    // relevant for p2p protocol only for now
-    fn peers_to_connect(&self) -> Vec<SocketAddr> {
-        Vec::new()
-    }
-
-    // TODO: MAKE OPTION, kick if none
-    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext;
+    // perhaps sent connection count along, to possibly reject based on
+    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Option<Self::ClientContext>;
+    fn delete_client(&self, addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>){}
 }
 pub struct JsonRpcProtocol<UP, E>
 where
     UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
     E: std::fmt::Display + Discriminant,
 {
-    pub up: UP, 
+    pub up: UP,
 }
 
 // UNDERLYING PROTOCOL
@@ -87,8 +82,8 @@ where
             + "\n"
     }
 
-    // perhaps save the format later... or smt
-    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext {
+    // perhaps save the format of given client requests later... or smt
+    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Option<Self::ClientContext> {
         self.up.create_client(addr, stream)
     }
 }

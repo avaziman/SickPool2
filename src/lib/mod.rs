@@ -4,3 +4,4 @@ pub mod server;
 pub mod stratum;
 pub mod protocol;
 pub mod p2p;
+pub mod config;

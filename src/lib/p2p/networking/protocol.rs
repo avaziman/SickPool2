@@ -1,13 +1,16 @@
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    net::IpAddr,
-    sync::{Arc, Mutex},
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
 };
 
-use bitcoincore_rpc::bitcoin::secp256k1::Message;
 use io_arc::IoArc;
-use log::{info, warn};
+use itertools::Itertools;
+use log::{error, info, warn};
 use mio::net::TcpStream;
 use primitive_types::U256;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -16,15 +19,17 @@ use std::net::SocketAddr;
 use crate::{protocol::Protocol, stratum::job_btc::BlockHeader};
 
 use super::{
-    discovery::discover_peers,
     hard_config::{self, OLDEST_COMPATIBLE_VERSION},
     peer::Peer,
+    utils::time_now_ms,
 };
 use bincode::{self};
 
 pub struct ProtocolP2P<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> {
     state: State<HeaderT>,
-    conf: ConfigP2P,
+    pub conf: ConfigP2P,
+    connection_count: AtomicU32,
+    data_dir: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -115,8 +120,17 @@ pub struct Share<HeaderT: BlockHeader + Clone> {
     hash: U256,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ConfigP2P {
     pub peer_connections: u32,
+}
+
+impl Default for ConfigP2P {
+    fn default() -> Self {
+        Self {
+            peer_connections: 32,
+        }
+    }
 }
 
 impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
@@ -124,28 +138,17 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
 {
     type Request = String;
     type Response = String;
-    type Config = ConfigP2P;
+    type Config = (ConfigP2P, String); // data dir
     type ClientContext = Peer;
     type ProcessingContext = ();
 
     fn new(conf: Self::Config) -> Self {
         Self {
             state: State::new(),
-            conf,
+            connection_count: AtomicU32::new(0),
+            conf: conf.0,
+            data_dir: conf.1,
         }
-    }
-
-    fn peers_to_connect(&self) -> Vec<std::net::SocketAddr> {
-        let peers: Vec<std::net::SocketAddr> = fs::read_to_string("peers.bin")
-            .unwrap_or(String::new())
-            .lines()
-            .map(|s| s.parse().expect("Invalid peers"))
-            .collect();
-
-        // while (peers.len() as u32) < conf.peer_connections {
-        //     info!("Discovering peers...");
-        // }
-        peers
     }
 
     fn process_request(
@@ -167,11 +170,31 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
         .unwrap()
     }
 
-    fn create_client(&self, address: SocketAddr, stream: IoArc<TcpStream>) -> Self::ClientContext {
-        Self::ClientContext {
-            address,
-            successfully_connected: false,
+    // TODO reject if hit limit
+    fn create_client(
+        &self,
+        address: SocketAddr,
+        stream: IoArc<TcpStream>,
+    ) -> Option<Self::ClientContext> {
+        let connection_count = self.connection_count.load(Ordering::Relaxed);
+        if connection_count >= self.conf.peer_connections {
+            None
+        } else {
+            self.connection_count
+                .store(connection_count + 1, Ordering::Relaxed);
+            Some(Self::ClientContext::new(
+                &self.get_peer_path(address).as_path(),
+                address,
+            ))
         }
+    }
+
+    // TODO clean
+    fn delete_client(&self, addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>) {
+        let mut lock = ctx.lock().unwrap();
+        lock.last_connection_fail = Some(time_now_ms());
+        lock.connected = false;
+        lock.save(self.get_peer_path(lock.address).as_path());
     }
 }
 
@@ -210,14 +233,18 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
         match message {
             Messages::Version(v) => {
                 if v >= OLDEST_COMPATIBLE_VERSION {
-                    ctx.lock().unwrap().successfully_connected = true;
+                    let mut lock = ctx.lock().unwrap();
+                    lock.authorized = true;
+                    lock.save(self.get_peer_path(lock.address).as_path());
                     Some(Messages::VerAck)
                 } else {
                     Some(Messages::Reject)
                 }
             }
             Messages::VerAck => {
-                ctx.lock().unwrap().successfully_connected = true;
+                let mut lock = ctx.lock().unwrap();
+                lock.authorized = true;
+                lock.save(self.get_peer_path(lock.address).as_path());
                 None
             }
             Messages::GetShares => Some(Messages::Shares(self.state.window_shares.get_shares())),
@@ -225,5 +252,51 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
             Messages::ShareSubmit(_) => todo!(),
             Messages::Reject => todo!(),
         }
+    }
+
+    // tells the server who to connect to at bootstrap
+    pub fn peers_to_connect(&self, amount: u32) -> Vec<std::net::SocketAddr> {
+        let mut peers: Vec<Peer> = Vec::with_capacity(amount as usize);
+        match fs::read_dir(format!("{}/peers", self.data_dir)) {
+            Ok(s) => {
+                for f in s {
+                    let f = f.unwrap();
+                    let peer = Peer::load(f.path().as_path()).expect("Bad peer file");
+                    // only try to connect to a peer once every ...
+                    let reconnection_cooldown: u64 = 10 * 1000;
+
+                    if !peer.connected
+                        && time_now_ms() - peer.last_connection_fail.unwrap_or_default()
+                            > reconnection_cooldown
+                    {
+                        peers.push(peer);
+                        if peers.len() >= amount as usize {
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => panic!("No peer list!"),
+        };
+
+        // .unwrap_or(String::new())
+        // .lines()
+        // .map(|s| s.parse().expect("Invalid peers"))
+        // .filter(|s| s)
+        // .collect();
+
+        // while (peers.len() as u32) < conf.peer_connections {
+        //     info!("Discovering peers...");
+        // }
+        let peers = peers.iter().map(|p| p.address).collect_vec();
+
+        if peers.len() < amount as usize {
+            error!("Failed to get enough peers");
+        }
+        peers
+    }
+
+    fn get_peer_path(&self, address: SocketAddr) -> PathBuf {
+        PathBuf::from(&format!("{}/peers/{}.json", self.data_dir, address))
     }
 }

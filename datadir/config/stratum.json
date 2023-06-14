@@ -1,5 +1,5 @@
 {
-    "stratum_address": "127.0.0.1:34254",
+    "address": "127.0.0.1:34254",
     "rpc_url": "127.0.0.1:18443",
     "job_poll_interval": "1s"
 }
