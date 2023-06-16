@@ -15,13 +15,14 @@ use crate::protocol::Protocol;
 type Slab<T> = slab::Slab<T>;
 
 const SERVER_TOKEN: Token = Token(usize::MAX);
-const TIMEOUT_SEC: u64 = 5;
+// const TIMEOUT_SEC: u64 = 5;
+const TIMEOUT_SEC: u64 = 1;
 const BUFF_CAPACITY: usize = 16 * 1024;
 const INITIAL_CLIENTS_CAPACITY: usize = 1024;
 
 pub struct Server<P: Protocol + Send + Sync> {
-    listener: TcpListener,
     pub conf: ServerConfig,
+    listener: TcpListener,
     token: Token,
     poll: Poll,
     connections: Slab<Connection<P::ClientContext>>,
@@ -38,6 +39,7 @@ pub struct Connection<T> {
     stream: IoArc<TcpStream>,
     reader: BufReader<IoArc<TcpStream>>,
     protocol_context: Arc<Mutex<T>>,
+    connected: bool,
 }
 
 impl<T> std::fmt::Display for Connection<T> {
@@ -46,15 +48,16 @@ impl<T> std::fmt::Display for Connection<T> {
     }
 }
 
-pub fn respond(mut stream: IoArc<TcpStream>, msg: &str) {
+pub fn respond(mut stream: IoArc<TcpStream>, msg: &[u8]) {
     // self.add_client_context(token, t);
-    if let Err(e) = stream.write_all(msg.as_bytes()) {
+    if let Err(e) = stream.write_all(msg) {
         warn!("error responding: {}", e);
     }
+    stream.flush().unwrap()
 }
 
 // all pools are edge triggered
-impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> Server<P> {
+impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static> Server<P> {
     pub fn new(conf: ServerConfig, protocol: Arc<P>) -> Server<P> {
         let mut listener = TcpListener::bind(conf.address).unwrap();
         let poll = Poll::new().unwrap();
@@ -149,11 +152,11 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
         let token = Token(vacant_entry.key());
         let key = vacant_entry.key();
 
-        if let Err(e) = self
-            .poll
-            .registry()
-            .register(&mut stream, token, Interest::READABLE)
-        {
+        if let Err(e) = self.poll.registry().register(
+            &mut stream,
+            token,
+            Interest::READABLE.add(Interest::WRITABLE),
+        ) {
             warn!(
                 "Error registering stream: {:?} -> {}, dropping...",
                 stream, e
@@ -177,6 +180,7 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
             reader: BufReader::with_capacity(BUFF_CAPACITY, stream.clone()),
             protocol_context: Arc::new(Mutex::new(ctx)),
             stream,
+            connected: true,
         });
 
         info!("Accepted connection (token: {}): {}", key, con);
@@ -186,7 +190,7 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
     // (requests, new connections, removed_connections)
     pub fn read_requests(
         &mut self,
-    ) -> Vec<(String, IoArc<TcpStream>, Arc<Mutex<P::ClientContext>>)> {
+    ) -> Vec<(Vec<u8>, IoArc<TcpStream>, Arc<Mutex<P::ClientContext>>)> {
         let mut events = Events::with_capacity(128);
         let mut lines = Vec::<_>::with_capacity(128);
         let mut new_cons = Vec::new();
@@ -209,6 +213,7 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
                 }
                 continue;
             }
+
             if event.is_readable() {
                 loop {
                     match self.read_ready_line(token, &mut removed_cons).take() {
@@ -224,6 +229,26 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
                     }
                 }
             }
+
+            // TODO: buffer failed writes
+            if event.is_writable() {
+                let con = &mut self.connections[token.0];
+                if !con.connected {
+                    match con.stream.as_ref().peer_addr() {
+                        Ok(k) => {
+                            // connected
+                            con.connected = true;
+                            info!("Connection to {} has been established!", con.addr);
+                            
+                            self.protocol
+                                .client_conncted(con.stream.clone(), con.protocol_context.clone());
+                        }
+                        Err(e) => {
+                            // connection still pending...
+                        }
+                    }
+                }
+            }
         }
 
         for to_remove in &removed_cons {
@@ -233,11 +258,23 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
         lines
     }
 
-    pub fn connect(&mut self, addr: SocketAddr) -> Option<Token> {
+    pub fn connect(&mut self, addr: SocketAddr) -> Option<IoArc<TcpStream>> {
         info!("Connecting to {}...", addr);
 
         match TcpStream::connect(addr) {
-            Ok(stream) => self.add_connection(stream, addr),
+            Ok(stream) => {
+                match self.add_connection(stream, addr) {
+                    Some(t) => {
+                        let con = &mut self.connections[t.0];
+                        con.connected = false;
+                        Some(con.stream.clone())
+
+                    }
+                    None => None,
+                }
+
+                // there was an idea to register write event to know when the connection established ...
+            }
             Err(e) => {
                 warn!("Failed to connect to: {} -> {}", addr, e);
                 None
@@ -251,11 +288,11 @@ impl<P: Protocol<Request = String, Response = String> + Send + Sync + 'static> S
     //     }
     // }
 
-    fn read_ready_line(&mut self, token: Token, to_remove: &mut Vec<Token>) -> Option<String> {
+    fn read_ready_line(&mut self, token: Token, to_remove: &mut Vec<Token>) -> Option<Vec<u8>> {
         let conn = &mut self.connections[token.0];
 
-        let mut line = String::new();
-        match conn.reader.read_line(&mut line) {
+        let mut line = Vec::new();
+        match conn.reader.read_until('\n' as u8, &mut line) {
             // disconnect. EOF
             Ok(0) => {
                 warn!("Client EOF: {}", &conn);

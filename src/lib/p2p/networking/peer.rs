@@ -8,6 +8,8 @@ use std::{
     time::Instant,
 };
 
+use super::protocol::{get_peer_path, Hello};
+
 const DEFAULT_PORT: u16 = 9001;
 
 type UnixMs = u64;
@@ -17,11 +19,12 @@ pub struct Peer {
     pub address: SocketAddr,
     // acknowledged version
     pub last_connection_fail: Option<UnixMs>,
+
     // runtime variables
-    // #[serde(skip)]
     #[serde(skip)]
-    pub authorized: bool,
-    
+    pub authorized: Option<u32>,
+    pub listening_port: Option<u16>,
+
     #[serde(default = "bool::default")]
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub connected: bool,
@@ -35,12 +38,13 @@ impl Peer {
                 exists.connected = true;
                 exists.save(path);
                 exists
-            },
+            }
             Err(e) => {
                 let newp = Peer {
                     address,
                     last_connection_fail: None,
-                    authorized: false,
+                    authorized: None,
+                    listening_port: None,
                     connected: true,
                 };
                 newp.save(path);
@@ -50,19 +54,13 @@ impl Peer {
     }
 
     pub fn load(path: &Path) -> std::io::Result<Self> {
-        // let path = get_path(address, datadir);
-
-        Ok(serde_json::from_reader(fs::File::open(path)?).unwrap())
+        Ok(serde_json::from_slice(&fs::read(path)?)
+            .expect(&format!("Bad peer file at: {}", path.display())))
     }
 
     pub fn save(&self, path: &Path) {
         fs::write(path, serde_json::to_string_pretty(self).unwrap()).unwrap();
     }
+}
 
-    fn get_path(&self, datadir: &str) -> String {
-        get_path(self.address, datadir)
-    }
-}
-fn get_path(address: SocketAddr, datadir: &str) -> String {
-    format!("{}/peers/{}.json", datadir, address)
-}
+// TODO listening port

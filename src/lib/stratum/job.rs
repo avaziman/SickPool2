@@ -8,7 +8,7 @@ pub struct Job<T, IdT = u32> {
     pub target: U256,
 }
 
-impl<T: BlockHeader + Clone> Job<T, u32> {
+impl<T: BlockHeader> Job<T, u32> {
     pub fn new(id: u32, header: T) -> Self {
         let target = header.get_target();
         Job { id, header, target}

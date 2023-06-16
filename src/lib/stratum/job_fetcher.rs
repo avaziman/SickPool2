@@ -5,7 +5,7 @@ use bitcoincore_rpc::{self, bitcoin::block::Header, Auth, RpcApi};
 use crate::stratum::job_btc::BlockHeader;
 
 pub trait HeaderFetcher {
-    type HeaderT: Clone + BlockHeader + std::fmt::Debug;
+    type HeaderT: BlockHeader;
     type ErrorT: std::fmt::Display;
     fn fetch_header(&self) -> Result<Self::HeaderT, Self::ErrorT>;
     fn new(url: &str) -> Self;

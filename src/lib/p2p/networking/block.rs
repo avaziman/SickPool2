@@ -3,7 +3,7 @@ use crate::stratum::job_btc::BlockHeader;
 use super::protocol::ShareWindow;
 
 pub trait Block {
-    type HeaderT: BlockHeader + Clone;
+    type HeaderT: BlockHeader;
     fn verify_coinbase_rewards(&self, shares: ShareWindow<Self::HeaderT>);
 }
 

@@ -4,11 +4,13 @@ use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::bitcoin::{BlockHash, CompactTarget, Target};
 use bitcoincore_rpc::json::GetBlockTemplateResult;
 use primitive_types::U256;
+use serde::{Serialize, Deserialize};
+use serde::de::DeserializeOwned;
 
 use super::protocol::SubmitReqParams;
 
 
-pub trait BlockHeader{
+pub trait BlockHeader : Clone + std::fmt::Debug + Serialize + DeserializeOwned {
     type BlockTemplateT;
     type SubmitParams;
 

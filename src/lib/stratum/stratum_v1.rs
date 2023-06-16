@@ -1,11 +1,10 @@
 use std::{
-    collections::{HashMap},
+    collections::HashMap,
     net::SocketAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex, RwLock,
     },
-    thread,
 };
 
 use bitcoincore_rpc::bitcoin::{self};
@@ -19,9 +18,9 @@ use crate::{protocol::Protocol, sickrpc::RpcReqBody};
 
 use super::{
     client::StratumClient,
+    common::{process_share, ShareResult},
     config::StratumConfig,
     job::Job,
-    job_btc::BlockHeader,
     job_fetcher::HeaderFetcher,
     job_manager::JobManager,
     protocol::{StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams},
@@ -71,25 +70,19 @@ where
             ptx.jobs = self.job_manager.read().unwrap().get_jobs()
         }
 
-        let job = match ptx.jobs.get_mut(&params.job_id) {
-            Some(job) => {
-                job.header.update_fields(&params);
-                job
-            }
-            None => return Err(StratumV1ErrorCodes::JobNotFound),
-        };
+        let lock = ctx.lock().unwrap();
+        let difficulty = lock.difficulty;
+        let address = lock.authorized_workers[&params.worker_name].clone();
 
-        let hash = job.header.get_hash();
-        let hash_target = U256::from(hash);
-        info!("Hash {}", hash_target);
+        let res = process_share(
+            ptx.jobs.get_mut(&params.job_id),
+            params,
+            difficulty,
+        );
 
-        if hash_target >= job.target {
-            Ok(Value::Bool(true))
-        } else if hash_target >= ctx.lock().unwrap().difficulty {
-            Ok(Value::Bool(true))
-        } else {
-            Err(StratumV1ErrorCodes::LowDifficultyShare)
-        }
+        // self.handler
+
+        res.into()
     }
 
     pub fn parse_stratum_req(
@@ -119,6 +112,16 @@ where
             }
         }
         false
+    }
+}
+
+impl Into<Result<Value, StratumV1ErrorCodes>> for ShareResult {
+    fn into(self) -> Result<Value, StratumV1ErrorCodes> {
+        match self {
+            ShareResult::Valid(_) | ShareResult::Block(_) => Ok(Value::Bool(true)),
+            ShareResult::Stale() => Err(StratumV1ErrorCodes::JobNotFound),
+            ShareResult::Invalid() => Err(StratumV1ErrorCodes::LowDifficultyShare),
+        }
     }
 }
 
@@ -177,7 +180,11 @@ where
         }
     }
 
-    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Option<Self::ClientContext> {
+    fn create_client(
+        &self,
+        addr: SocketAddr,
+        stream: IoArc<TcpStream>,
+    ) -> Option<Self::ClientContext> {
         let id = self.client_count.load(Ordering::Relaxed);
         self.client_count.store(id + 1, Ordering::Relaxed);
         Some(StratumClient::new(stream, id))

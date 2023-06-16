@@ -38,7 +38,7 @@ impl<T: HeaderFetcher<HeaderT = Header> + Send + Sync + 'static> StratumServer<T
                     info!("New job!");
                     let lock = protocol.up.subscribed_clients.lock().unwrap();
                     for (token, stream) in &*lock {
-                        respond(stream.clone(), "NEW JOB");
+                        respond(stream.clone(), "NEW JOB".as_bytes());
                     }
                 }
             }

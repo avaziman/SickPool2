@@ -29,7 +29,9 @@ pub trait Protocol {
 
     // perhaps sent connection count along, to possibly reject based on
     fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Option<Self::ClientContext>;
+    
     fn delete_client(&self, addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>){}
+    fn client_conncted(&self, stream: IoArc<TcpStream>, ctx: Arc<Mutex<Self::ClientContext>>){}
 }
 pub struct JsonRpcProtocol<UP, E>
 where
@@ -46,9 +48,9 @@ where
     UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
     E: std::fmt::Display + Discriminant,
 {
-    type Request = String;
+    type Request = Vec<u8>;
     // type Response = RpcResponse;
-    type Response = String;
+    type Response = Vec<u8>;
     type Config = UP::Config;
     type ClientContext = UP::ClientContext;
     // cloned per processing thread
@@ -64,7 +66,7 @@ where
         ctx: Arc<Mutex<Self::ClientContext>>,
         ptx: &mut Self::ProcessingContext,
     ) -> Self::Response {
-        serde_json::to_string(&match Self::parse_request(&req) {
+        let mut bytes = serde_json::to_vec(&match Self::parse_request(&req) {
             Ok(rpc_request) => RpcResponse::new(
                 rpc_request.id,
                 self.up
@@ -78,8 +80,9 @@ where
                 }
             }
         })
-        .unwrap()
-            + "\n"
+        .unwrap();
+        bytes.push('\n' as u8);
+        bytes
     }
 
     // perhaps save the format of given client requests later... or smt
@@ -94,7 +97,7 @@ where
     E: std::fmt::Display + Discriminant,
 {
     #[doc(hidden)]
-    pub fn parse_request(req: &String) -> Result<RpcRequest, serde_json::Error> {
-        serde_json::from_str::<RpcRequest>(req)
+    pub fn parse_request(req: &[u8]) -> Result<RpcRequest, serde_json::Error> {
+        serde_json::from_slice::<RpcRequest>(req)
     }
 }

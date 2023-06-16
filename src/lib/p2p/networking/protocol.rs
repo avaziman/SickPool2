@@ -1,10 +1,11 @@
 use std::{
     collections::{HashMap, VecDeque},
+    fmt::Debug,
     fs,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
     },
 };
 
@@ -16,26 +17,48 @@ use primitive_types::U256;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::net::SocketAddr;
 
-use crate::{protocol::Protocol, stratum::job_btc::BlockHeader};
+use crate::{
+    protocol::Protocol,
+    server::respond,
+    stratum::{common::ShareResult, job_btc::BlockHeader},
+};
 
 use super::{
-    hard_config::{self, OLDEST_COMPATIBLE_VERSION},
+    hard_config::{self, CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION},
     peer::Peer,
     utils::time_now_ms,
 };
 use bincode::{self};
 
-pub struct ProtocolP2P<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> {
+pub struct ProtocolP2P<HeaderT>
+{
     state: State<HeaderT>,
     pub conf: ConfigP2P,
+    hello_message: Messages<HeaderT>,
     connection_count: AtomicU32,
     data_dir: String,
+    local_best_shares: RwLock<HashMap<Address, ShareResult>>,
 }
 
-#[derive(Deserialize, Serialize)]
-pub enum Messages<HeaderT: BlockHeader + Clone> {
+#[derive(Deserialize, Serialize, Debug)]
+pub struct Hello {
+    version: u32,
+    listening_port: u16,
+}
+
+impl Hello {
+    pub fn new(port: u16) -> Hello {
+        Self {
+            version: CURRENT_VERSION,
+            listening_port: port,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub enum Messages<HeaderT> {
     Reject,
-    Version(u32),
+    Hello(Hello),
     VerAck,
     // get all the submitted shares during the current window
     GetShares,
@@ -43,10 +66,10 @@ pub enum Messages<HeaderT: BlockHeader + Clone> {
     ShareSubmit(HeaderT),
 }
 
-pub type Address = u8;
+pub type Address = String;
 pub type Reward = u64;
 
-pub struct ShareWindow<HeaderT: BlockHeader + Clone> {
+pub struct ShareWindow<HeaderT> {
     window: VecDeque<Share<HeaderT>>,
     sum: u64,
 }
@@ -56,7 +79,7 @@ fn get_diff(hash: &U256) -> u64 {
     (DIFF1 / hash).as_u64()
 }
 
-impl<HeaderT: BlockHeader + Clone> ShareWindow<HeaderT> {
+impl<HeaderT: BlockHeader> ShareWindow<HeaderT> {
     fn new() -> Self {
         Self {
             window: VecDeque::with_capacity(hard_config::BLOCK_WINDOW as usize),
@@ -90,13 +113,13 @@ impl<HeaderT: BlockHeader + Clone> ShareWindow<HeaderT> {
     }
 }
 
-pub struct State<HeaderT: BlockHeader + Clone> {
+pub struct State<HeaderT> {
     rewards: Vec<(Address, Reward)>,
     window_shares: ShareWindow<HeaderT>,
     adresses_map: HashMap<Address, AddressInfo>,
 }
 
-impl<HeaderT: BlockHeader + Clone> State<HeaderT> {
+impl<HeaderT: BlockHeader> State<HeaderT> {
     pub fn new() -> Self {
         Self {
             rewards: Vec::new(),
@@ -110,8 +133,8 @@ struct AddressInfo {
     last_submit: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Share<HeaderT: BlockHeader + Clone> {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Share<HeaderT> {
     address: Address,
     header: HeaderT,
     submit_height: u32,
@@ -133,12 +156,12 @@ impl Default for ConfigP2P {
     }
 }
 
-impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
+impl<HeaderT: BlockHeader> Protocol
     for ProtocolP2P<HeaderT>
 {
-    type Request = String;
-    type Response = String;
-    type Config = (ConfigP2P, String); // data dir
+    type Request = Vec<u8>;
+    type Response = Vec<u8>;
+    type Config = (ConfigP2P, String, u16); // data dir, listening port
     type ClientContext = Peer;
     type ProcessingContext = ();
 
@@ -148,6 +171,8 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
             connection_count: AtomicU32::new(0),
             conf: conf.0,
             data_dir: conf.1,
+            hello_message: Messages::Hello(Hello::new(conf.2)),
+            local_best_shares: RwLock::new(HashMap::new()),
         }
     }
 
@@ -157,17 +182,19 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
         ctx: Arc<Mutex<Self::ClientContext>>,
         ptx: &mut Self::ProcessingContext,
     ) -> Self::Response {
-        String::from_utf8(
-            bincode::serialize(&match Self::parse_request(&req) {
-                Ok(message) => self.process_message(ctx, message).unwrap(),
-                Err(e) => {
-                    warn!("Failed to parse request: {}", e);
-                    Messages::Reject
+        Self::serialize_message(&match Self::parse_request(&req) {
+            Ok(message) => match self.process_message(ctx, message) {
+                Some(k) => {
+                    info!("Responded with message: {:?}", &k);
+                    k
                 }
-            })
-            .unwrap(),
-        )
-        .unwrap()
+                None => return Vec::new(),
+            },
+            Err(e) => {
+                warn!("Failed to parse request: {}", e);
+                Messages::Reject
+            }
+        })
     }
 
     // TODO reject if hit limit
@@ -182,11 +209,17 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> Protocol
         } else {
             self.connection_count
                 .store(connection_count + 1, Ordering::Relaxed);
+
             Some(Self::ClientContext::new(
                 &self.get_peer_path(address).as_path(),
                 address,
             ))
         }
+    }
+
+    fn client_conncted(&self, stream: IoArc<TcpStream>, ctx: Arc<Mutex<Self::ClientContext>>) {
+        info!("Sent hello to: {}", ctx.lock().unwrap().address);
+        Self::send_message(&self.hello_message, stream);
     }
 
     // TODO clean
@@ -202,7 +235,7 @@ fn is_eligble_to_submit(last_submit: u32, current_height: u32) -> bool {
     last_submit + hard_config::BLOCK_WINDOW > current_height
 }
 
-impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<HeaderT> {
+impl<HeaderT: BlockHeader> ProtocolP2P<HeaderT> {
     fn verify_share(&mut self, share: Share<HeaderT>) {
         let submitter_info = &self.state.adresses_map[&share.address];
         let current_height = 0;
@@ -221,8 +254,8 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
     }
 
     #[doc(hidden)]
-    pub fn parse_request(req: &String) -> Result<Messages<HeaderT>, bincode::Error> {
-        bincode::deserialize(&req.as_bytes())
+    pub fn parse_request(req: &[u8]) -> Result<Messages<HeaderT>, bincode::Error> {
+        bincode::deserialize(&req)
     }
 
     fn process_message(
@@ -230,11 +263,13 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
         ctx: Arc<Mutex<Peer>>,
         message: Messages<HeaderT>,
     ) -> Option<Messages<HeaderT>> {
+        info!("Received p2p message: {:?}", &message);
         match message {
-            Messages::Version(v) => {
-                if v >= OLDEST_COMPATIBLE_VERSION {
+            Messages::Hello(v) => {
+                if v.version >= OLDEST_COMPATIBLE_VERSION {
                     let mut lock = ctx.lock().unwrap();
-                    lock.authorized = true;
+                    lock.authorized = Some(v.version);
+                    lock.listening_port = Some(v.listening_port);
                     lock.save(self.get_peer_path(lock.address).as_path());
                     Some(Messages::VerAck)
                 } else {
@@ -242,8 +277,9 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
                 }
             }
             Messages::VerAck => {
+                // listening port is already known as it was used to connect...
                 let mut lock = ctx.lock().unwrap();
-                lock.authorized = true;
+                lock.authorized = Some(CURRENT_VERSION);
                 lock.save(self.get_peer_path(lock.address).as_path());
                 None
             }
@@ -252,6 +288,18 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
             Messages::ShareSubmit(_) => todo!(),
             Messages::Reject => todo!(),
         }
+    }
+
+    pub fn send_message(message: &Messages<HeaderT>, stream: IoArc<TcpStream>) {
+        respond(stream, Self::serialize_message(message).as_ref())
+    }
+
+    pub fn serialize_message(message: &Messages<HeaderT>) -> Vec<u8> {
+        let mut bytes = bincode::serialize(message).unwrap();
+        bytes.push('\n' as u8);
+        bytes
+
+        // can be done more elgantly with a custom buffer reader...
     }
 
     // tells the server who to connect to at bootstrap
@@ -269,9 +317,11 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
                         && time_now_ms() - peer.last_connection_fail.unwrap_or_default()
                             > reconnection_cooldown
                     {
-                        peers.push(peer);
-                        if peers.len() >= amount as usize {
-                            break;
+                        if peer.listening_port.is_some() {
+                            peers.push(peer);
+                            if peers.len() >= amount as usize {
+                                break;
+                            }
                         }
                     }
                 }
@@ -288,15 +338,41 @@ impl<HeaderT: BlockHeader + DeserializeOwned + Serialize + Clone> ProtocolP2P<He
         // while (peers.len() as u32) < conf.peer_connections {
         //     info!("Discovering peers...");
         // }
-        let peers = peers.iter().map(|p| p.address).collect_vec();
+        let peers = peers
+            .iter()
+            .map(|p| SocketAddr::new(p.address.ip(), p.listening_port.unwrap()))
+            .collect_vec();
 
         if peers.len() < amount as usize {
-            error!("Failed to get enough peers");
+            // error!("Failed to get enough peers");
         }
         peers
     }
 
     fn get_peer_path(&self, address: SocketAddr) -> PathBuf {
-        PathBuf::from(&format!("{}/peers/{}.json", self.data_dir, address))
+        PathBuf::from(get_peer_path(address, &self.data_dir))
     }
+
+    pub fn add_local_share(
+        &self,
+        address: Address,
+        share_res: crate::stratum::common::ShareResult,
+    ) {
+        let lock = self.local_best_shares.read().unwrap();
+        // let current_best = lock[&address];
+
+        // match share_res {
+        //     ShareResult::Valid(hash) | ShareResult::Block(hash) => {
+        //         // if hash > current_best.
+        //     },
+        //     ShareResult::Stale() => todo!(),
+        //     ShareResult::Invalid() => todo!(),
+        // }
+        // lock.insert(address, share_res);
+        
+    }
+}
+
+pub fn get_peer_path(address: SocketAddr, datadir: &str) -> String {
+    format!("{}/peers/{}.json", datadir, address.ip())
 }
