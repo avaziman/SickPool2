@@ -4,14 +4,16 @@ use log::info;
 
 use super::{job::Job, job_btc::BlockHeader, job_fetcher::HeaderFetcher};
 
-pub struct JobManager<RpcClient: HeaderFetcher> {
+pub struct JobManager<Fetcher: HeaderFetcher> {
     job_count: u32,
-    jobs: HashMap<u32, Job<RpcClient::HeaderT>>,
+    jobs: HashMap<u32, Job<Fetcher::HeaderT>>,
 }
 
 // job manager is responsible for generating and updating jobs, the only one that can mutate jobs
-impl<RpcClient: HeaderFetcher> JobManager<RpcClient> {
-    pub fn new(header_fetcher: &RpcClient) -> JobManager<RpcClient> {
+impl<Fetcher: HeaderFetcher> JobManager<Fetcher> {
+    pub fn new(
+        header_fetcher: &Fetcher,
+    ) -> JobManager<Fetcher> {
         let mut jobs = HashMap::with_capacity(16);
 
         match header_fetcher.fetch_header() {
@@ -30,14 +32,13 @@ impl<RpcClient: HeaderFetcher> JobManager<RpcClient> {
 
     pub fn get_new_job(
         &mut self,
-        header_fetcher: &RpcClient,
-    ) -> Result<Option<&Job<RpcClient::HeaderT>>, RpcClient::ErrorT> {
+        header_fetcher: &Fetcher,
+    ) -> Result<Option<&Job<Fetcher::HeaderT>>, Fetcher::ErrorT> {
         let header = header_fetcher.fetch_header()?;
 
         if header.equal(&self.jobs[&(self.job_count - 1)].header) {
             return Ok(None);
         }
-        
 
         let job = Job::new(self.job_count, header);
         self.job_count += 1;
@@ -49,11 +50,11 @@ impl<RpcClient: HeaderFetcher> JobManager<RpcClient> {
         Ok(Some(self.jobs.get(&id).unwrap()))
     }
 
-    pub fn get_job_count(&self) -> u32{
+    pub fn get_job_count(&self) -> u32 {
         self.job_count
     }
 
-    pub fn get_jobs(&self) -> HashMap<u32, Job<RpcClient::HeaderT>>{
+    pub fn get_jobs(&self) -> HashMap<u32, Job<Fetcher::HeaderT>> {
         self.jobs.clone()
     }
 }

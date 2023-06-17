@@ -20,7 +20,7 @@ const TIMEOUT_SEC: u64 = 1;
 const BUFF_CAPACITY: usize = 16 * 1024;
 const INITIAL_CLIENTS_CAPACITY: usize = 1024;
 
-pub struct Server<P: Protocol + Send + Sync> {
+pub struct Server<P: Protocol> {
     pub conf: ServerConfig,
     listener: TcpListener,
     token: Token,

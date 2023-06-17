@@ -30,14 +30,13 @@ use super::{
 };
 use bincode::{self};
 
-pub struct ProtocolP2P<HeaderT>
-{
+pub struct ProtocolP2P<HeaderT> {
     state: State<HeaderT>,
     pub conf: ConfigP2P,
     hello_message: Messages<HeaderT>,
     connection_count: AtomicU32,
     data_dir: String,
-    local_best_shares: RwLock<HashMap<Address, ShareResult>>,
+    local_best_shares: RwLock<HashMap<Address, U256>>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -156,9 +155,7 @@ impl Default for ConfigP2P {
     }
 }
 
-impl<HeaderT: BlockHeader> Protocol
-    for ProtocolP2P<HeaderT>
-{
+impl<HeaderT: BlockHeader> Protocol for ProtocolP2P<HeaderT> {
     type Request = Vec<u8>;
     type Response = Vec<u8>;
     type Config = (ConfigP2P, String, u16); // data dir, listening port
@@ -359,17 +356,21 @@ impl<HeaderT: BlockHeader> ProtocolP2P<HeaderT> {
         share_res: crate::stratum::common::ShareResult,
     ) {
         let lock = self.local_best_shares.read().unwrap();
-        // let current_best = lock[&address];
+        let current_best = &lock[&address];
 
-        // match share_res {
-        //     ShareResult::Valid(hash) | ShareResult::Block(hash) => {
-        //         // if hash > current_best.
-        //     },
-        //     ShareResult::Stale() => todo!(),
-        //     ShareResult::Invalid() => todo!(),
-        // }
-        // lock.insert(address, share_res);
-        
+        match share_res {
+            ShareResult::Valid(hash) | ShareResult::Block(hash) => {
+                if hash < *current_best {
+                    info!("New best share for {}", address);
+                    
+                    let mut lock = self.local_best_shares.write().unwrap();
+                    lock.insert(address, hash);
+                }
+            }
+            ShareResult::Stale() => todo!(),
+            ShareResult::Invalid() => todo!(),
+            ShareResult::Duplicate() => todo!(),
+        }
     }
 }
 

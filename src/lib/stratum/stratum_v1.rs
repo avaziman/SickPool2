@@ -14,7 +14,7 @@ use mio::{net::TcpStream, Token};
 use primitive_types::U256;
 use serde_json::Value;
 
-use crate::{protocol::Protocol, sickrpc::RpcReqBody};
+use crate::{protocol::Protocol, sickrpc::RpcReqBody, p2p::networking::stratum_handler::CompleteStrartumHandler};
 
 use super::{
     client::StratumClient,
@@ -23,13 +23,14 @@ use super::{
     job::Job,
     job_fetcher::HeaderFetcher,
     job_manager::JobManager,
-    protocol::{StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams},
+    protocol::{StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams}, handler::StratumHandler,
 };
 
 // original slush bitcoin stratum protocol
 pub struct StratumV1<T: HeaderFetcher> {
     job_manager: RwLock<JobManager<T>>,
     client_count: AtomicUsize,
+    handler: CompleteStrartumHandler<T>,
     pub subscribed_clients: Mutex<HashMap<Token, IoArc<TcpStream>>>,
     pub daemon_cli: T,
 }
@@ -70,17 +71,17 @@ where
             ptx.jobs = self.job_manager.read().unwrap().get_jobs()
         }
 
-        let lock = ctx.lock().unwrap();
+        let mut lock = ctx.lock().unwrap();
         let difficulty = lock.difficulty;
         let address = lock.authorized_workers[&params.worker_name].clone();
 
         let res = process_share(
             ptx.jobs.get_mut(&params.job_id),
             params,
-            difficulty,
+        &mut *lock,
         );
 
-        // self.handler
+        // self.handler.on_share(address, , res);
 
         res.into()
     }
@@ -121,6 +122,7 @@ impl Into<Result<Value, StratumV1ErrorCodes>> for ShareResult {
             ShareResult::Valid(_) | ShareResult::Block(_) => Ok(Value::Bool(true)),
             ShareResult::Stale() => Err(StratumV1ErrorCodes::JobNotFound),
             ShareResult::Invalid() => Err(StratumV1ErrorCodes::LowDifficultyShare),
+            ShareResult::Duplicate() => Err(StratumV1ErrorCodes::DuplicateShare),
         }
     }
 }
@@ -160,6 +162,7 @@ where
             client_count: AtomicUsize::new(0),
             subscribed_clients: Mutex::new(HashMap::new()),
             daemon_cli,
+            handler: todo!(),
         }
     }
 

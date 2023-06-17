@@ -33,20 +33,17 @@ pub trait Protocol {
     fn delete_client(&self, addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>){}
     fn client_conncted(&self, stream: IoArc<TcpStream>, ctx: Arc<Mutex<Self::ClientContext>>){}
 }
-pub struct JsonRpcProtocol<UP, E>
-where
-    UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
-    E: std::fmt::Display + Discriminant,
+pub struct JsonRpcProtocol<UP>
 {
     pub up: UP,
 }
 
 // UNDERLYING PROTOCOL
 // this layer is responsibile for keeping the rpc req id, and forwarding the underlying request to the ud protocol
-impl<UP, E> Protocol for JsonRpcProtocol<UP, E>
+impl<UP, E> Protocol for JsonRpcProtocol<UP>
 where
+E: std::fmt::Display + Discriminant,
     UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
-    E: std::fmt::Display + Discriminant,
 {
     type Request = Vec<u8>;
     // type Response = RpcResponse;
@@ -91,10 +88,10 @@ where
     }
 }
 
-impl<UP, E> JsonRpcProtocol<UP, E>
+impl<UP, E> JsonRpcProtocol<UP>
 where
-    UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
     E: std::fmt::Display + Discriminant,
+    UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
 {
     #[doc(hidden)]
     pub fn parse_request(req: &[u8]) -> Result<RpcRequest, serde_json::Error> {

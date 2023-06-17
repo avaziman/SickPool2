@@ -10,6 +10,7 @@ use super::protocol::{ConfigP2P, ProtocolP2P};
 use crate::p2p::networking::hard_config::CURRENT_VERSION;
 use crate::p2p::networking::protocol::{Hello, Messages};
 use crate::protocol::Protocol;
+use crate::stratum::job_btc::BlockHeader;
 use crate::{
     config::ProtocolServerConfig,
     server::Server,
@@ -17,10 +18,10 @@ use crate::{
 };
 
 // can operate without a stratum server
-pub struct ServerP2P<T: HeaderFetcher<HeaderT = Header> + Send + Sync + 'static> {
+pub struct ServerP2P<Fetcher: HeaderFetcher> {
     // stratum: StratumServer<T>,
-    protocol: Arc<ProtocolP2P<T::HeaderT>>,
-    server: Server<ProtocolP2P<T::HeaderT>>,
+    protocol: Arc<ProtocolP2P<Fetcher::HeaderT>>,
+    server: Server<ProtocolP2P<Fetcher::HeaderT>>,
     pending_connections: Vec<IoArc<TcpStream>>,
 }
 
