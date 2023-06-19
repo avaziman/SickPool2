@@ -33,6 +33,7 @@ pub struct SubmitReqParams {
 }
 
 #[repr(u32)]
+#[derive(Debug)]
 pub enum StratumV1ErrorCodes {
     Unknown(String) = 20,
     JobNotFound = 21,
@@ -59,7 +60,7 @@ impl fmt::Display for StratumV1ErrorCodes {
             StratumV1ErrorCodes::JobNotFound => write!(f, "Job not found"),
             StratumV1ErrorCodes::DuplicateShare => write!(f, "Duplicate share"),
             StratumV1ErrorCodes::LowDifficultyShare => write!(f, "Low difficulty share"),
-            StratumV1ErrorCodes::UnauthorizedWorker => write!(f, "Anauthorized worker"),
+            StratumV1ErrorCodes::UnauthorizedWorker => write!(f, "Unauthorized worker"),
             StratumV1ErrorCodes::NotSubscribed => write!(f, "Client not subscribed"),
         }
     }

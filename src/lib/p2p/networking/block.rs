@@ -1,28 +1,19 @@
-use crate::stratum::job_btc::BlockHeader;
 
-use super::protocol::ShareWindow;
+use itertools::Itertools;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-pub trait Block {
+use crate::stratum::header::BlockHeader;
+
+use super::protocol::{ShareWindow, ShareP2P};
+
+pub trait Block : Clone + std::fmt::Debug + Serialize + DeserializeOwned{
     type HeaderT: BlockHeader;
-    fn verify_coinbase_rewards(&self, shares: ShareWindow<Self::HeaderT>);
-}
+    type BlockTemplateT;
 
-impl Block for bitcoincore_rpc::bitcoin::block::Block {
-    type HeaderT = bitcoincore_rpc::bitcoin::block::Header;
-
-    fn verify_coinbase_rewards(&self, shares: ShareWindow<Self::HeaderT>) {
-        let coinbase = match self.coinbase(){
-            Some(k) => k,
-            None => todo!(),
-        };
-        let reward = coinbase.output.iter().map(|o| o.value).sum();
-
-        for (i, out) in coinbase.output.iter().enumerate() {
-
-            
-
-            shares.get_reward(i, reward);
-        }
-    }
-    
+    fn get_header_mut(&mut self) -> &mut Self::HeaderT;
+    fn get_header(&self) -> &Self::HeaderT;
+    fn from_block_template(template: &Self::BlockTemplateT) -> Self;
+    fn verify_coinbase_rewards(&self, shares: &ShareWindow<Self>) -> bool;
+    fn into_p2p(self, height: u32) -> Option<ShareP2P<Self>>;
 }

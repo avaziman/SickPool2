@@ -1,18 +1,18 @@
 use std::path::PathBuf;
 
-use bitcoincore_rpc::{self, bitcoin::block::Header, Auth, RpcApi};
+use bitcoincore_rpc::{self, bitcoin::{block::Header, self}, Auth, RpcApi};
 
-use crate::stratum::job_btc::BlockHeader;
+use crate::{stratum::header::BlockHeader, p2p::networking::block::Block};
 
-pub trait HeaderFetcher {
-    type HeaderT: BlockHeader;
+pub trait BlockFetcher {
+    type BlockT: Block;
     type ErrorT: std::fmt::Display;
-    fn fetch_header(&self) -> Result<Self::HeaderT, Self::ErrorT>;
+    fn fetch_block(&self) -> Result<(Self::BlockT, u32), Self::ErrorT>;
     fn new(url: &str) -> Self;
 }
 
-impl HeaderFetcher for bitcoincore_rpc::Client {
-    type HeaderT = Header;
+impl BlockFetcher for bitcoincore_rpc::Client {
+    type BlockT = bitcoin::Block;
     type ErrorT = bitcoincore_rpc::Error;
 
     fn new(url: &str) -> Self {
@@ -23,7 +23,7 @@ impl HeaderFetcher for bitcoincore_rpc::Client {
         .unwrap()
     }
 
-    fn fetch_header(&self) -> Result<Header, bitcoincore_rpc::Error> {
+    fn fetch_block(&self) -> Result<(bitcoin::Block, u32), bitcoincore_rpc::Error> {
         use bitcoincore_rpc::json::*;
 
         let header = self.get_block_template(
@@ -31,29 +31,30 @@ impl HeaderFetcher for bitcoincore_rpc::Client {
             &[GetBlockTemplateRules::SegWit],
             &[],
         )?;
+        let height = header.height;
 
-        Ok(Header::from_block_template(&header))
+        Ok((Self::BlockT::from_block_template(&header), height as u32))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use job_btc::BlockHeader;
-    use crate::stratum::job_btc;
+    use header::BlockHeader;
+    use crate::stratum::header;
 
-    use super::HeaderFetcher;
+    use super::BlockFetcher;
     use bitcoincore_rpc::{self, bitcoin::block::Header};
 
     struct TestBtcFetcher {}
-    impl HeaderFetcher for TestBtcFetcher {
-        type HeaderT = Header;
+    impl BlockFetcher for TestBtcFetcher {
+        type BlockT = Header;
         type ErrorT = bitcoincore_rpc::Error;
 
         fn new(url: &str) -> Self {
             TestBtcFetcher {}
         }
 
-        fn fetch_header(&self) -> Result<Header, bitcoincore_rpc::Error> {
+        fn fetch_block(&self) -> Result<Header, bitcoincore_rpc::Error> {
             use bitcoincore_rpc::json::*;
 
             let header : GetBlockTemplateResult= serde_json::from_str(

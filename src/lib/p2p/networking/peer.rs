@@ -1,14 +1,9 @@
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fs,
-    net::{IpAddr, SocketAddr},
+    net::{SocketAddr},
     path::Path,
-    time::Instant,
 };
-
-use super::protocol::{get_peer_path, Hello};
 
 const DEFAULT_PORT: u16 = 9001;
 
@@ -62,5 +57,3 @@ impl Peer {
         fs::write(path, serde_json::to_string_pretty(self).unwrap()).unwrap();
     }
 }
-
-// TODO listening port

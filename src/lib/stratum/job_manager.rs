@@ -2,23 +2,23 @@ use std::collections::HashMap;
 
 use log::info;
 
-use super::{job::Job, job_btc::BlockHeader, job_fetcher::HeaderFetcher};
+use crate::p2p::networking::block::Block;
 
-pub struct JobManager<Fetcher: HeaderFetcher> {
+use super::{job::Job, header::BlockHeader, job_fetcher::BlockFetcher};
+
+pub struct JobManager<Fetcher: BlockFetcher> {
     job_count: u32,
-    jobs: HashMap<u32, Job<Fetcher::HeaderT>>,
+    jobs: HashMap<u32, Job<Fetcher::BlockT>>,
 }
 
 // job manager is responsible for generating and updating jobs, the only one that can mutate jobs
-impl<Fetcher: HeaderFetcher> JobManager<Fetcher> {
-    pub fn new(
-        header_fetcher: &Fetcher,
-    ) -> JobManager<Fetcher> {
+impl<Fetcher: BlockFetcher> JobManager<Fetcher> {
+    pub fn new(header_fetcher: &Fetcher) -> JobManager<Fetcher> {
         let mut jobs = HashMap::with_capacity(16);
 
-        match header_fetcher.fetch_header() {
-            Ok(header) => {
-                let job = Job::new(0, header);
+        match header_fetcher.fetch_block() {
+            Ok((header, height)) => {
+                let job = Job::new(0, header, height);
 
                 info!("First job: {:#?}", job);
 
@@ -33,16 +33,19 @@ impl<Fetcher: HeaderFetcher> JobManager<Fetcher> {
     pub fn get_new_job(
         &mut self,
         header_fetcher: &Fetcher,
-    ) -> Result<Option<&Job<Fetcher::HeaderT>>, Fetcher::ErrorT> {
-        let header = header_fetcher.fetch_header()?;
+    ) -> Result<Option<&Job<Fetcher::BlockT>>, Fetcher::ErrorT> {
+        let (header, height) = header_fetcher.fetch_block()?;
 
-        if header.equal(&self.jobs[&(self.job_count - 1)].header) {
+        if header
+            .get_header()
+            .equal(&self.jobs[&(self.job_count - 1)].block.get_header())
+        {
             return Ok(None);
         }
 
-        let job = Job::new(self.job_count, header);
+        let job = Job::new(self.job_count, header, height);
+
         self.job_count += 1;
-        // info!("New job: {:#?}", job);
 
         let id = job.id;
         self.jobs.insert(job.id, job);
@@ -54,7 +57,7 @@ impl<Fetcher: HeaderFetcher> JobManager<Fetcher> {
         self.job_count
     }
 
-    pub fn get_jobs(&self) -> HashMap<u32, Job<Fetcher::HeaderT>> {
+    pub fn get_jobs(&self) -> HashMap<u32, Job<Fetcher::BlockT>> {
         self.jobs.clone()
     }
 }

@@ -1,11 +1,11 @@
-use std::{
-    net::{SocketAddr, IpAddr},
-    sync::{Arc, Mutex},
-};
-use mio::net::TcpStream;
 use io_arc::IoArc;
 use log::warn;
+use mio::net::TcpStream;
 use serde_json::Value;
+use std::{
+    net::{SocketAddr},
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     sickrpc::{ResultOrErr, RpcReqBody, RpcRequest, RpcResponse},
@@ -28,13 +28,22 @@ pub trait Protocol {
     ) -> Self::Response;
 
     // perhaps sent connection count along, to possibly reject based on
-    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Option<Self::ClientContext>;
-    
-    fn delete_client(&self, addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>){}
-    fn client_conncted(&self, stream: IoArc<TcpStream>, ctx: Arc<Mutex<Self::ClientContext>>){}
+    fn create_client(
+        &self,
+        addr: SocketAddr,
+        stream: IoArc<TcpStream>,
+        token: mio::Token,
+    ) -> Option<Self::ClientContext>;
+
+    fn delete_client(
+        &self,
+        addr: SocketAddr,
+        ctx: Arc<Mutex<Self::ClientContext>>,
+        token: mio::Token,
+    );
+    fn client_conncted(&self, stream: IoArc<TcpStream>, ctx: Arc<Mutex<Self::ClientContext>>) {}
 }
-pub struct JsonRpcProtocol<UP>
-{
+pub struct JsonRpcProtocol<UP> {
     pub up: UP,
 }
 
@@ -42,7 +51,7 @@ pub struct JsonRpcProtocol<UP>
 // this layer is responsibile for keeping the rpc req id, and forwarding the underlying request to the ud protocol
 impl<UP, E> Protocol for JsonRpcProtocol<UP>
 where
-E: std::fmt::Display + Discriminant,
+    E: std::fmt::Display + Discriminant,
     UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
 {
     type Request = Vec<u8>;
@@ -83,8 +92,22 @@ E: std::fmt::Display + Discriminant,
     }
 
     // perhaps save the format of given client requests later... or smt
-    fn create_client(&self, addr: SocketAddr, stream: IoArc<TcpStream>) -> Option<Self::ClientContext> {
-        self.up.create_client(addr, stream)
+    fn create_client(
+        &self,
+        addr: SocketAddr,
+        stream: IoArc<TcpStream>,
+        token: mio::Token,
+    ) -> Option<Self::ClientContext> {
+        self.up.create_client(addr, stream, token)
+    }
+
+    fn delete_client(
+        &self,
+        addr: SocketAddr,
+        ctx: Arc<Mutex<Self::ClientContext>>,
+        token: mio::Token,
+    ) {
+        self.up.delete_client(addr, ctx, token)
     }
 }
 

@@ -1,9 +1,9 @@
 use log::info;
 use primitive_types::U256;
 
-use crate::p2p::networking::protocol::Address;
+use crate::p2p::networking::{protocol::Address, block::Block};
 
-use super::{job::Job, job_btc::BlockHeader, client::StratumClient};
+use super::{job::Job, header::BlockHeader, client::StratumClient};
 
 pub enum ShareResult {
     Valid(U256),
@@ -14,17 +14,17 @@ pub enum ShareResult {
 }
 
 #[inline]
-pub fn process_share<T: BlockHeader>(
-    job: Option<&mut Job<T>>,
-    params: T::SubmitParams,
+pub fn process_share<T: Block>(
+    job: &mut Option<&mut Job<T>>,
+    params: <T::HeaderT as BlockHeader>::SubmitParams,
     client: &mut StratumClient,
 ) -> ShareResult {
     match job {
         Some(job) => {
-            job.header.update_fields(&params);
-            let share = job.header.clone();
+            job.block.get_header_mut().update_fields(&params);
+            let share = job.block.clone();
 
-            let hash = job.header.get_hash();
+            let hash = job.block.get_header().get_hash();
             let low = hash.low_u64();
             if client.submitted_shares.contains(&low) {
                 return ShareResult::Duplicate();
@@ -32,7 +32,7 @@ pub fn process_share<T: BlockHeader>(
 
             client.submitted_shares.insert(low);
 
-            info!("Hash {}", hash);
+            info!("Hash {:x}", hash);
 
             if hash >= job.target {
                 ShareResult::Block(hash)

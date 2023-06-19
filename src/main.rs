@@ -26,7 +26,7 @@ fn read_config<T: Default + serde::de::DeserializeOwned + serde::Serialize>(
                     .as_bytes(),
             )
             .expect("Failed to write config default file");
-            return Err(format!("Missing config file at: {}, generated default config, modify it and restart to continue.", path));
+            return Err(format!("Missing config file at: {}, generated default config, modify it and restart to continue. {}", path, e));
         }
     };
     match serde_json::from_str(&data) {
@@ -52,10 +52,10 @@ fn main() -> Result<(), String> {
     info!("Stratum config: {:#?}", &stratum_config);
     info!("P2P config: {:#?}", &p2p_config);
 
-    let mut stratum_server: StratumServer<bitcoincore_rpc::Client> =
-        StratumServer::new(stratum_config);
-
     let mut p2p_server: ServerP2P<bitcoincore_rpc::Client> = ServerP2P::new(p2p_config, data_dir);
+
+    let mut stratum_server: StratumServer<bitcoincore_rpc::Client> =
+        StratumServer::new(stratum_config, p2p_server.protocol.clone());
 
     let stratum_thread = std::thread::spawn(move || loop {
         stratum_server.process_stratum();

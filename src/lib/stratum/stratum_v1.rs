@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex, RwLock,
     },
+    time::Instant,
 };
 
 use bitcoincore_rpc::bitcoin::{self};
@@ -14,30 +15,39 @@ use mio::{net::TcpStream, Token};
 use primitive_types::U256;
 use serde_json::Value;
 
-use crate::{protocol::Protocol, sickrpc::RpcReqBody, p2p::networking::stratum_handler::CompleteStrartumHandler};
+use crate::{
+    p2p::networking::{
+        protocol::{Address, ProtocolP2P},
+        stratum_handler::CompleteStrartumHandler,
+    },
+    protocol::Protocol,
+    server::respond,
+    sickrpc::RpcReqBody,
+};
 
 use super::{
     client::StratumClient,
     common::{process_share, ShareResult},
     config::StratumConfig,
+    handler::StratumHandler,
     job::Job,
-    job_fetcher::HeaderFetcher,
+    job_fetcher::BlockFetcher,
     job_manager::JobManager,
-    protocol::{StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams}, handler::StratumHandler,
+    protocol::{StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams},
 };
 
 // original slush bitcoin stratum protocol
-pub struct StratumV1<T: HeaderFetcher> {
+pub struct StratumV1<T: BlockFetcher> {
     job_manager: RwLock<JobManager<T>>,
     client_count: AtomicUsize,
-    handler: CompleteStrartumHandler<T>,
+    pub handler: CompleteStrartumHandler<T::BlockT>,
     pub subscribed_clients: Mutex<HashMap<Token, IoArc<TcpStream>>>,
     pub daemon_cli: T,
 }
 
 impl<T> StratumV1<T>
 where
-    T: HeaderFetcher<HeaderT = bitcoin::block::Header>,
+    T: BlockFetcher<BlockT = bitcoin::Block>,
 {
     pub fn process_stratum_request(
         &self,
@@ -45,17 +55,32 @@ where
         ctx: Arc<Mutex<StratumClient>>,
         ptx: &mut StratumProcessingContext<T>,
     ) -> Result<Value, StratumV1ErrorCodes> {
-        match req {
+        let now = Instant::now();
+        info!("Received stratum request: {:?}", req);
+
+        let res = match req {
             StratumRequestsBtc::Submit(req) => self.process_submit(req, ctx, ptx),
             StratumRequestsBtc::Subscribe => {
+                let lock = ctx.lock().unwrap();
                 self.subscribed_clients
                     .lock()
                     .unwrap()
-                    .insert(Token(0), ctx.lock().unwrap().stream.clone());
+                    .insert(lock.token, lock.stream.clone());
                 Ok(Value::Bool(true))
             }
-            StratumRequestsBtc::Authorize(_) => Ok(Value::Bool(true)),
-        }
+            StratumRequestsBtc::Authorize(params) => {
+                // TODO: get address
+                ctx.lock()
+                    .unwrap()
+                    .authorized_workers
+                    .insert(params.username, Address::new());
+                Ok(Value::Bool(true))
+            }
+        };
+
+        let elapsed = now.elapsed().as_micros();
+        info!("Processed stratum response in {}us: {:?}", elapsed, &res);
+        res
     }
 
     fn process_submit(
@@ -71,17 +96,23 @@ where
             ptx.jobs = self.job_manager.read().unwrap().get_jobs()
         }
 
+        let mut job = ptx.jobs.get_mut(&params.job_id);
         let mut lock = ctx.lock().unwrap();
         let difficulty = lock.difficulty;
-        let address = lock.authorized_workers[&params.worker_name].clone();
+        let address = match lock.authorized_workers.get(&params.worker_name) {
+            Some(s) => s.clone(),
+            None => return Err(StratumV1ErrorCodes::UnauthorizedWorker),
+        };
 
-        let res = process_share(
-            ptx.jobs.get_mut(&params.job_id),
-            params,
-        &mut *lock,
-        );
+        let res = process_share(&mut job, params, &mut *lock);
 
-        // self.handler.on_share(address, , res);
+        match res {
+            ShareResult::Valid(diff) | ShareResult::Block(diff) => {
+                self.handler
+                    .on_valid_share(address, &job.unwrap().block, diff)
+            }
+            _ => {}
+        };
 
         res.into()
     }
@@ -103,16 +134,25 @@ where
         }
     }
 
-    pub fn fetch_new_job(&self, header_fetcher: &T) -> bool {
+    pub fn fetch_new_job(&self, header_fetcher: &T) {
         let mut lock = self.job_manager.write().unwrap();
         let res = lock.get_new_job(header_fetcher);
 
-        if let Ok(r) = res {
-            if let Some(r) = r {
-                return true;
+        if let Ok(job) = res {
+            if let Some(job) = job {
+                let lock = self.subscribed_clients.lock().unwrap();
+                info!(
+                    "New job! broadcasting to {} clients: {:?}",
+                    lock.len(),
+                    lock
+                );
+
+                for (token, stream) in &*lock {
+                    respond(stream.clone(), "NEW JOB".as_bytes());
+                }
+                self.handler.on_new_block(job.height, &job.block);
             }
         }
-        false
     }
 }
 
@@ -127,13 +167,13 @@ impl Into<Result<Value, StratumV1ErrorCodes>> for ShareResult {
     }
 }
 
-pub struct StratumProcessingContext<RpcClient: HeaderFetcher> {
-    pub jobs: HashMap<u32, Job<RpcClient::HeaderT>>,
+pub struct StratumProcessingContext<RpcClient: BlockFetcher> {
+    pub jobs: HashMap<u32, Job<RpcClient::BlockT>>,
 }
 
 impl<T> Default for StratumProcessingContext<T>
 where
-    T: HeaderFetcher<HeaderT = bitcoin::block::Header>,
+    T: BlockFetcher<BlockT = bitcoin::Block>,
 {
     fn default() -> Self {
         StratumProcessingContext {
@@ -145,24 +185,24 @@ where
 // any client that can generate the compatible header can be suited to this stratum protocol
 impl<T> Protocol for StratumV1<T>
 where
-    T: HeaderFetcher<HeaderT = bitcoin::block::Header>,
+    T: BlockFetcher<BlockT = bitcoin::Block>,
 {
     // method, params
     type Request = RpcReqBody;
     type Response = Result<Value, StratumV1ErrorCodes>;
-    type Config = StratumConfig;
+    type Config = (StratumConfig, Arc<ProtocolP2P<T::BlockT>>);
     type ClientContext = StratumClient;
     type ProcessingContext = StratumProcessingContext<T>;
 
     fn new(conf: Self::Config) -> Self {
-        let daemon_cli = T::new(conf.rpc_url.as_ref());
+        let daemon_cli = T::new(conf.0.rpc_url.as_ref());
 
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),
             client_count: AtomicUsize::new(0),
             subscribed_clients: Mutex::new(HashMap::new()),
             daemon_cli,
-            handler: todo!(),
+            handler: CompleteStrartumHandler { p2p: conf.1 },
         }
     }
 
@@ -187,11 +227,22 @@ where
         &self,
         addr: SocketAddr,
         stream: IoArc<TcpStream>,
+        token: mio::Token,
     ) -> Option<Self::ClientContext> {
         let id = self.client_count.load(Ordering::Relaxed);
         self.client_count.store(id + 1, Ordering::Relaxed);
-        Some(StratumClient::new(stream, id))
+        Some(StratumClient::new(stream, token, id))
+    }
+
+    fn delete_client(&self, addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>, token: Token) {
+        let lock = ctx.lock().unwrap();
+        self.subscribed_clients.lock().unwrap().remove(&lock.token);
     }
 }
 
-// TODO REMOVE FROM SUBSCRIBED CLIETNS
+// demo \n
+/*
+{"id": 1, "method": "mining.subscribe", "params": []}
+{"params": ["slush.miner1", "password"], "id": 2, "method": "mining.authorize"}
+{"params": ["slush.miner1", "00000000", "00000001", "504e86ed", "b2957c02"], "id": 4, "method": "mining.submit"}
+ */

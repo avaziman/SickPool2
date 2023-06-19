@@ -103,7 +103,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
             self.tpool.execute(move || {
                 let mut ptx = P::ProcessingContext::default();
-                info!("Received request: {:?}", req);
+                // info!("Received request: {:?}", req);
                 let now = Instant::now();
 
                 let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
@@ -111,7 +111,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                 let elapsed = now.elapsed().as_micros();
                 respond(writer, stratum_resp.as_ref());
 
-                info!("Processed response: {:?}, in {}us", stratum_resp, elapsed);
+                // info!("Processed response: {:?}, in {}us", stratum_resp, elapsed);
             });
         }
 
@@ -127,7 +127,9 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
         let cn = self.connections.remove(token.0);
         info!("Disconnecting connection: {}", cn);
 
-        self.protocol.delete_client(cn.addr, cn.protocol_context);
+        self.protocol.delete_client(cn.addr, cn.protocol_context, token);
+
+        // all ars must be dropped here
     }
 
     fn accept_connection(&mut self) -> Option<Token> {
@@ -168,7 +170,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
         let stream = IoArc::new(stream);
 
-        let ctx = match self.protocol.create_client(addr, stream.clone()) {
+        let ctx = match self.protocol.create_client(addr, stream.clone(), token) {
             Some(k) => k,
             None => {
                 return None;
