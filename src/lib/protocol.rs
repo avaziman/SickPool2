@@ -41,7 +41,7 @@ pub trait Protocol {
         ctx: Arc<Mutex<Self::ClientContext>>,
         token: mio::Token,
     );
-    fn client_conncted(&self, stream: IoArc<TcpStream>, ctx: Arc<Mutex<Self::ClientContext>>) {}
+    fn client_conncted(&self, _stream: IoArc<TcpStream>, _ctx: Arc<Mutex<Self::ClientContext>>) {}
 }
 pub struct JsonRpcProtocol<UP> {
     pub up: UP,

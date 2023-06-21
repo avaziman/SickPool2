@@ -1,11 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    net::{SocketAddr},
-    path::Path,
-};
-
-const DEFAULT_PORT: u16 = 9001;
+use std::{fs, net::SocketAddr, path::Path};
 
 type UnixMs = u64;
 
@@ -26,34 +20,13 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(path: &Path, address: SocketAddr) -> Self {
-        match Self::load(path) {
-            Ok(mut exists) => {
-                // we are about to connect... this method is called on connection.
-                exists.connected = true;
-                exists.save(path);
-                exists
-            }
-            Err(e) => {
-                let newp = Peer {
-                    address,
-                    last_connection_fail: None,
-                    authorized: None,
-                    listening_port: None,
-                    connected: true,
-                };
-                newp.save(path);
-                newp
-            }
+    pub fn new(address: SocketAddr) -> Self {
+        Peer {
+            address,
+            last_connection_fail: None,
+            authorized: None,
+            listening_port: None,
+            connected: true,
         }
-    }
-
-    pub fn load(path: &Path) -> std::io::Result<Self> {
-        Ok(serde_json::from_slice(&fs::read(path)?)
-            .expect(&format!("Bad peer file at: {}", path.display())))
-    }
-
-    pub fn save(&self, path: &Path) {
-        fs::write(path, serde_json::to_string_pretty(self).unwrap()).unwrap();
     }
 }

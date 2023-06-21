@@ -1,23 +1,24 @@
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+
+
+use std::path::Path;
+use std::sync::{Arc};
 
 use bitcoincore_rpc::bitcoin;
-use bitcoincore_rpc::bitcoin::block::Header;
-use io_arc::IoArc;
-use log::info;
-use mio::Token;
-use mio::net::TcpStream;
+
+
+
+
+
 
 use super::protocol::{ConfigP2P, ProtocolP2P};
-use crate::p2p::networking::hard_config::CURRENT_VERSION;
-use crate::p2p::networking::protocol::{Hello, Messages};
+
+
 use crate::protocol::Protocol;
-use crate::stratum::header::BlockHeader;
+
 use crate::{
     config::ProtocolServerConfig,
     server::Server,
-    stratum::{config::StratumConfig, job_fetcher::BlockFetcher, server::StratumServer},
+    stratum::{job_fetcher::BlockFetcher},
 };
 
 // can operate without a stratum server
@@ -28,7 +29,7 @@ pub struct ServerP2P<Fetcher: BlockFetcher> {
 }
 
 impl<T: BlockFetcher<BlockT = bitcoin::Block> + Send + Sync + 'static> ServerP2P<T> {
-    pub fn new(p2pconf: ProtocolServerConfig<ConfigP2P>, data_dir: String) -> Self {
+    pub fn new(p2pconf: ProtocolServerConfig<ConfigP2P>, data_dir: Box<Path>) -> Self {
         let protocol = Arc::new(ProtocolP2P::new((
             p2pconf.protocol_config,
             data_dir,
@@ -56,7 +57,7 @@ impl<T: BlockFetcher<BlockT = bitcoin::Block> + Send + Sync + 'static> ServerP2P
                 continue;
             }
 
-            let token = self.server.connect(i);
+            let _token = self.server.connect(i);
         }
     }
 

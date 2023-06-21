@@ -2,7 +2,7 @@ use std::collections::{HashSet, HashMap};
 
 use io_arc::IoArc;
 use mio::net::TcpStream;
-use primitive_types::U256;
+use crypto_bigint::U256;
 
 use crate::p2p::networking::protocol::Address;
 
@@ -21,7 +21,7 @@ impl StratumClient {
         StratumClient {
             stream,
             extra_nonce: id,
-            difficulty: U256::zero(),
+            difficulty: U256::ZERO,
             authorized_workers: HashMap::new(),
             submitted_shares: HashSet::new(),
             token,

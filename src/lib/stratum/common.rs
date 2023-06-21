@@ -1,7 +1,7 @@
 use log::info;
-use primitive_types::U256;
+use crypto_bigint::U256;
 
-use crate::p2p::networking::{protocol::Address, block::Block};
+use crate::p2p::networking::{block::Block};
 
 use super::{job::Job, header::BlockHeader, client::StratumClient};
 
@@ -22,10 +22,11 @@ pub fn process_share<T: Block>(
     match job {
         Some(job) => {
             job.block.get_header_mut().update_fields(&params);
-            let share = job.block.clone();
+            let _share = job.block.clone();
 
             let hash = job.block.get_header().get_hash();
-            let low = hash.low_u64();
+            let low = hash.as_words()[0];
+            
             if client.submitted_shares.contains(&low) {
                 return ShareResult::Duplicate();
             }

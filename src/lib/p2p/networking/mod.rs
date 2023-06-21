@@ -7,3 +7,8 @@ pub mod server;
 pub mod utils;
 pub mod stratum_handler;
 pub mod bitcoin;
+pub mod difficulty;
+pub mod block_manager;
+pub mod peer_manager;
+pub mod messages;
+pub mod pplns;

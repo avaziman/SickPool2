@@ -77,6 +77,7 @@
 #[cfg(test)]
 pub mod tests {
 
+    use bitcoincore_rpc::Client;
     use mio::Token;
     use serde_json::{json, Value};
 
@@ -94,7 +95,7 @@ pub mod tests {
         let req = String::from(req);
 
         // let rpc_result: (String, Token) = rpc_server::parse_req(&req).unwrap();
-        let result = JsonRpcProtocol::<StratumV1::<bitcoincore_rpc::Client>, StratumV1ErrorCodes>::parse_request(&req).unwrap();
+        let result = JsonRpcProtocol::<StratumV1<Client>>::parse_request(&req.as_bytes()).unwrap();
         // JsonRpcProtocol::parse_req(&req).unwrap();
         // assert_eq!(result id: Some(4), method: String::from("mining.submit"), jsonrpc: None })
         assert_eq!(result.id, Some(4));

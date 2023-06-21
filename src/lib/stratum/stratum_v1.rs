@@ -5,14 +5,14 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex, RwLock,
     },
-    time::Instant,
+    time::Instant, str::FromStr,
 };
 
-use bitcoincore_rpc::bitcoin::{self};
+use bitcoincore_rpc::bitcoin::{self, PublicKey};
 use io_arc::IoArc;
 use log::info;
 use mio::{net::TcpStream, Token};
-use primitive_types::U256;
+
 use serde_json::Value;
 
 use crate::{
@@ -70,10 +70,11 @@ where
             }
             StratumRequestsBtc::Authorize(params) => {
                 // TODO: get address
+                let pk = PublicKey::from_str(&params.username).unwrap();
                 ctx.lock()
                     .unwrap()
                     .authorized_workers
-                    .insert(params.username, Address::new());
+                    .insert(params.username, pk);
                 Ok(Value::Bool(true))
             }
         };
@@ -98,7 +99,7 @@ where
 
         let mut job = ptx.jobs.get_mut(&params.job_id);
         let mut lock = ctx.lock().unwrap();
-        let difficulty = lock.difficulty;
+        let _difficulty = lock.difficulty;
         let address = match lock.authorized_workers.get(&params.worker_name) {
             Some(s) => s.clone(),
             None => return Err(StratumV1ErrorCodes::UnauthorizedWorker),
@@ -147,7 +148,7 @@ where
                     lock
                 );
 
-                for (token, stream) in &*lock {
+                for (_token, stream) in &*lock {
                     respond(stream.clone(), "NEW JOB".as_bytes());
                 }
                 self.handler.on_new_block(job.height, &job.block);
@@ -225,7 +226,7 @@ where
 
     fn create_client(
         &self,
-        addr: SocketAddr,
+        _addr: SocketAddr,
         stream: IoArc<TcpStream>,
         token: mio::Token,
     ) -> Option<Self::ClientContext> {
@@ -234,7 +235,7 @@ where
         Some(StratumClient::new(stream, token, id))
     }
 
-    fn delete_client(&self, addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>, token: Token) {
+    fn delete_client(&self, _addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>, _token: Token) {
         let lock = ctx.lock().unwrap();
         self.subscribed_clients.lock().unwrap().remove(&lock.token);
     }

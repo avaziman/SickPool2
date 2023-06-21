@@ -88,7 +88,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
     }
 
     pub fn is_connected(&self, addr: SocketAddr) -> bool {
-        for (token, con) in &self.connections {
+        for (_token, con) in &self.connections {
             if con.addr == addr {
                 return true;
             }
@@ -108,7 +108,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
                 let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
 
-                let elapsed = now.elapsed().as_micros();
+                let _elapsed = now.elapsed().as_micros();
                 respond(writer, stratum_resp.as_ref());
 
                 // info!("Processed response: {:?}, in {}us", stratum_resp, elapsed);
@@ -135,7 +135,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
     fn accept_connection(&mut self) -> Option<Token> {
         match self.listener.accept() {
             Ok((stream, addr)) => {
-                if let Err(e) = stream.set_nodelay(true) {
+                if let Err(_e) = stream.set_nodelay(true) {
                     warn!("Failed to set socket nodelay: {}", addr);
                     return None;
                 }
@@ -237,7 +237,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                 let con = &mut self.connections[token.0];
                 if !con.connected {
                     match con.stream.as_ref().peer_addr() {
-                        Ok(k) => {
+                        Ok(_k) => {
                             // connected
                             con.connected = true;
                             info!("Connection to {} has been established!", con.addr);
@@ -245,7 +245,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                             self.protocol
                                 .client_conncted(con.stream.clone(), con.protocol_context.clone());
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             // connection still pending...
                         }
                     }

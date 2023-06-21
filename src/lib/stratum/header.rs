@@ -1,9 +1,9 @@
 
 use bitcoincore_rpc::bitcoin::hashes::Hash;
-use bitcoincore_rpc::bitcoin::{BlockHash, Target};
-use bitcoincore_rpc::json::GetBlockTemplateResult;
-use primitive_types::U256;
-use serde::{Serialize, Deserialize};
+use bitcoincore_rpc::bitcoin::{Target};
+
+use crypto_bigint::{U256, Encoding};
+use serde::{Serialize};
 use serde::de::DeserializeOwned;
 
 use super::protocol::SubmitReqParams;
@@ -28,11 +28,11 @@ impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
     }
 
     fn get_hash(&self) -> U256 {
-        U256::from(self.block_hash().to_byte_array())
+        U256::from_le_bytes(self.block_hash().to_byte_array())
     }
 
     fn get_target(&self) -> U256 {
-        U256::from(Target::from_compact(self.bits).to_le_bytes())
+        U256::from_le_bytes(Target::from_compact(self.bits).to_le_bytes())
     }
 
     fn equal(&self, other: &Self) -> bool {

@@ -1,20 +1,20 @@
-use std::io::Write;
+
 use std::thread;
-use std::{net::SocketAddr, sync::Arc};
+use std::{sync::Arc};
 
 use bitcoincore_rpc::bitcoin;
-use bitcoincore_rpc::bitcoin::block::Header;
-use log::info;
+
+
 
 use crate::config::ProtocolServerConfig;
 use crate::p2p::networking::protocol::ProtocolP2P;
 use crate::protocol::Protocol;
-use crate::server::respond;
+
 use crate::{protocol::JsonRpcProtocol, server::Server};
 
-use super::handler::StratumHandler;
+
 use super::{
-    config::StratumConfig, job_fetcher::BlockFetcher, protocol::StratumV1ErrorCodes,
+    config::StratumConfig, job_fetcher::BlockFetcher,
     stratum_v1::StratumV1,
 };
 

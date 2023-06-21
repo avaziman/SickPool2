@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use log::info;
 
-use crate::p2p::networking::block::Block;
+use crate::p2p::networking::{block::Block};
 
-use super::{job::Job, header::BlockHeader, job_fetcher::BlockFetcher};
+use super::{header::BlockHeader, job::Job, job_fetcher::BlockFetcher};
 
 pub struct JobManager<Fetcher: BlockFetcher> {
     job_count: u32,
@@ -17,8 +17,8 @@ impl<Fetcher: BlockFetcher> JobManager<Fetcher> {
         let mut jobs = HashMap::with_capacity(16);
 
         match header_fetcher.fetch_block() {
-            Ok((header, height)) => {
-                let job = Job::new(0, header, height);
+            Ok(res) => {
+                let job = Job::new(0, res.block, res.height, res.reward);
 
                 info!("First job: {:#?}", job);
 
@@ -34,16 +34,22 @@ impl<Fetcher: BlockFetcher> JobManager<Fetcher> {
         &mut self,
         header_fetcher: &Fetcher,
     ) -> Result<Option<&Job<Fetcher::BlockT>>, Fetcher::ErrorT> {
-        let (header, height) = header_fetcher.fetch_block()?;
+        let fetched = header_fetcher.fetch_block()?;
 
-        if header
+        if fetched
+            .block
             .get_header()
             .equal(&self.jobs[&(self.job_count - 1)].block.get_header())
         {
             return Ok(None);
         }
 
-        let job = Job::new(self.job_count, header, height);
+        let job = Job::new(
+            self.job_count,
+            fetched.block,
+            fetched.height,
+            fetched.reward,
+        );
 
         self.job_count += 1;
 

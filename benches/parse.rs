@@ -1,4 +1,6 @@
+use crypto_bigint::U256;
 use sickpool2lib::{
+    p2p::networking::difficulty::get_diff,
     protocol::JsonRpcProtocol,
     stratum::{protocol::StratumV1ErrorCodes, stratum_v1::StratumV1},
 };
@@ -14,9 +16,28 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("parse", move |b| {
         b.iter(|| {
-            let json_req = JsonRpcProtocol::<StratumV1::<bitcoincore_rpc::Client>, StratumV1ErrorCodes>::parse_request(&req).unwrap();
+            let json_req = JsonRpcProtocol::<StratumV1<bitcoincore_rpc::Client>>::parse_request(
+                &req.as_bytes(),
+            )
+            .unwrap();
 
-            let stratum_req = StratumV1::<bitcoincore_rpc::Client>::parse_stratum_req(json_req.method, json_req.params).unwrap();
+            StratumV1::<bitcoincore_rpc::Client>::parse_stratum_req(
+                json_req.method,
+                json_req.params,
+            )
+            .unwrap();
+        })
+    });
+}
+
+fn criterion_benchmark2(c: &mut Criterion) {
+    let mut check =
+        U256::from_be_hex("00000000000404CB000000000000000000000000000000000000000000000000");
+
+    c.bench_function("getdiff", move |b| {
+        b.iter(|| {
+            get_diff(check);
+            check = check.wrapping_add(&U256::ONE);
         })
     });
 }
@@ -31,5 +52,5 @@ fn criterion_benchmark(c: &mut Criterion) {
 //     c.bench_function("parse", |b| b.iter(|| test_cli.fetch_header()));
 // }
 
-criterion_group!(benches, criterion_benchmark /* , bench_job_fetch */);
+criterion_group!(benches, criterion_benchmark, criterion_benchmark2 /* , bench_job_fetch */);
 criterion_main!(benches);
