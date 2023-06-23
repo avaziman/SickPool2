@@ -1,4 +1,6 @@
 {
   "address": "127.0.0.1:1968",
-  "peer_connections": 32
+  "peer_connections": 32,
+  "block_time": "1s",
+  "diff_adjust_blocks": 16
 }

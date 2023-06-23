@@ -4,7 +4,7 @@ mod currency;
 use log::info;
 use log4rs;
 use sickpool2lib::config::ProtocolServerConfig;
-use sickpool2lib::p2p::networking::protocol::ConfigP2P;
+use sickpool2lib::p2p::networking::config::ConfigP2P;
 use sickpool2lib::p2p::networking::server::ServerP2P;
 use sickpool2lib::stratum::server::StratumServer;
 use std::path::{Path, PathBuf};
@@ -50,10 +50,10 @@ fn main() -> Result<(), String> {
     let buf = PathBuf::from(&data_dir);
 
     let stratum_cfg_path =
-        PathBuf::from_iter([&buf, &"stratum.json".parse().unwrap()].iter()).into_boxed_path();
+        PathBuf::from_iter([&buf, &"config/stratum.json".parse().unwrap()].iter()).into_boxed_path();
 
     let p2p_cfg_path =
-        PathBuf::from_iter([&buf, &"p2p.json".parse().unwrap()].iter()).into_boxed_path();
+        PathBuf::from_iter([&buf, &"config/p2p.json".parse().unwrap()].iter()).into_boxed_path();
 
     let stratum_config: ProtocolServerConfig<StratumConfig> = read_config(&stratum_cfg_path)?;
 

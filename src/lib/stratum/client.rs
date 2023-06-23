@@ -4,27 +4,27 @@ use io_arc::IoArc;
 use mio::net::TcpStream;
 use crypto_bigint::U256;
 
-use crate::p2p::networking::protocol::Address;
+use crate::{p2p::networking::protocol::Address, server::Notifier};
 
 #[derive(Debug)]
 pub struct StratumClient {
-    pub token: mio::Token,
-    pub stream: IoArc<TcpStream>,
+    pub notifier: Notifier,
     pub extra_nonce: usize,
     pub authorized_workers: HashMap<String, Address>,
     pub submitted_shares: HashSet<u64>,
     pub difficulty: U256,
+    pub subscription_key: Option<usize>
 }
 
 impl StratumClient {
-    pub fn new(stream: IoArc<TcpStream>, token: mio::Token, id: usize) -> StratumClient {
+    pub fn new(notifier: Notifier, id: usize) -> StratumClient {
         StratumClient {
-            stream,
+            notifier,
             extra_nonce: id,
             difficulty: U256::ZERO,
             authorized_workers: HashMap::new(),
             submitted_shares: HashSet::new(),
-            token,
+            subscription_key: None
         }
     }
 }

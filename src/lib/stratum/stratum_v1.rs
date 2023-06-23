@@ -1,28 +1,30 @@
+use bitcoincore_rpc::bitcoin::{self, Address, PublicKey};
+use hex::encode;
+use io_arc::IoArc;
+use itertools::Itertools;
+use log::{info, warn};
+use mio::{net::TcpStream, Token};
+use slab::Slab;
 use std::{
     collections::HashMap,
     net::SocketAddr,
+    str::FromStr,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, RwLock,
+        Arc, Mutex, RwLock, MutexGuard,
     },
-    time::Instant, str::FromStr,
+    time::Instant,
 };
 
-use bitcoincore_rpc::bitcoin::{self, PublicKey};
-use io_arc::IoArc;
-use log::info;
-use mio::{net::TcpStream, Token};
-
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{
     p2p::networking::{
-        protocol::{Address, ProtocolP2P},
-        stratum_handler::CompleteStrartumHandler,
+        pplns::MyBtcAddr, protocol::ProtocolP2P, stratum_handler::CompleteStrartumHandler,
     },
     protocol::Protocol,
-    server::respond,
-    sickrpc::RpcReqBody,
+    server::{respond, Notifier},
+    sickrpc::{RpcReqBody, RpcRequest},
 };
 
 use super::{
@@ -40,8 +42,9 @@ use super::{
 pub struct StratumV1<T: BlockFetcher> {
     job_manager: RwLock<JobManager<T>>,
     client_count: AtomicUsize,
+    config: StratumConfig,
     pub handler: CompleteStrartumHandler<T::BlockT>,
-    pub subscribed_clients: Mutex<HashMap<Token, IoArc<TcpStream>>>,
+    pub subscribed_clients: Mutex<Slab<Notifier>>,
     pub daemon_cli: T,
 }
 
@@ -61,20 +64,42 @@ where
         let res = match req {
             StratumRequestsBtc::Submit(req) => self.process_submit(req, ctx, ptx),
             StratumRequestsBtc::Subscribe => {
-                let lock = ctx.lock().unwrap();
-                self.subscribed_clients
+                let mut lock = ctx.lock().unwrap();
+                let key = self
+                    .subscribed_clients
                     .lock()
                     .unwrap()
-                    .insert(lock.token, lock.stream.clone());
-                Ok(Value::Bool(true))
+                    .insert(lock.notifier.clone());
+
+                lock.subscription_key = Some(key);
+                Ok(json!([
+                    [
+                        ["mining.set_difficulty", Value::Null],
+                        ["mining.notify", Value::Null]
+                    ],
+                    hex::encode(lock.extra_nonce.to_be_bytes()),
+                    8,
+                ]))
             }
             StratumRequestsBtc::Authorize(params) => {
                 // TODO: get address
-                let pk = PublicKey::from_str(&params.username).unwrap();
+                let pk = match Address::from_str(&params.username) {
+                    Ok(k) => {
+                        // let atype = k.assume_checked().address_type();
+                        // info!("Type: {:?}", atype);
+                        k.require_network(bitcoin::Network::Bitcoin).unwrap()
+                    }
+                    Err(_) => {
+                        return Err(StratumV1ErrorCodes::Unknown(String::from(
+                            "Invalid address provided",
+                        )));
+                    }
+                };
                 ctx.lock()
                     .unwrap()
                     .authorized_workers
-                    .insert(params.username, pk);
+                    .insert(params.username, MyBtcAddr(pk));
+
                 Ok(Value::Bool(true))
             }
         };
@@ -135,25 +160,29 @@ where
         }
     }
 
-    pub fn fetch_new_job(&self, header_fetcher: &T) {
+    pub fn fetch_new_job(&self, header_fetcher: &T) -> Option<Job<T::BlockT>> {
         let mut lock = self.job_manager.write().unwrap();
         let res = lock.get_new_job(header_fetcher);
 
         if let Ok(job) = res {
             if let Some(job) = job {
-                let lock = self.subscribed_clients.lock().unwrap();
-                info!(
-                    "New job! broadcasting to {} clients: {:?}",
-                    lock.len(),
-                    lock
-                );
+                // let lock = self.subscribed_clients.lock().unwrap();
+                // info!(
+                //     "New job! broadcasting to {} clients: {:?}",
+                //     lock.len(),
+                //     lock
+                // );
 
-                for (_token, stream) in &*lock {
-                    respond(stream.clone(), "NEW JOB".as_bytes());
-                }
-                self.handler.on_new_block(job.height, &job.block);
+                return Some(job.clone());
+
+                // for (_token, notifier) in &*lock {
+                //     // notifier.notify(job.get_broadcast_message());
+                //     // respond(stream.as_ref(), .as_bytes());
+                // }
+                // self.handler.on_new_block(job.height, &job.block);
             }
         }
+        None
     }
 }
 
@@ -194,6 +223,7 @@ where
     type Config = (StratumConfig, Arc<ProtocolP2P<T::BlockT>>);
     type ClientContext = StratumClient;
     type ProcessingContext = StratumProcessingContext<T>;
+    type Notification = Self::Request;
 
     fn new(conf: Self::Config) -> Self {
         let daemon_cli = T::new(conf.0.rpc_url.as_ref());
@@ -201,9 +231,10 @@ where
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),
             client_count: AtomicUsize::new(0),
-            subscribed_clients: Mutex::new(HashMap::new()),
+            subscribed_clients: Mutex::new(Slab::new()),
             daemon_cli,
             handler: CompleteStrartumHandler { p2p: conf.1 },
+            config: conf.0,
         }
     }
 
@@ -216,28 +247,47 @@ where
         match Self::parse_stratum_req(req.0, req.1) {
             Ok(stratum_req) => self.process_stratum_request(stratum_req, ctx, ptx),
             Err(e) => {
+                warn!("Failed to parse stratum request: {}", e);
                 return Err(StratumV1ErrorCodes::Unknown(format!(
-                    "Failed to parse request: {}",
+                    "Failed to parse stratum request: {}",
                     e
                 )));
             }
         }
     }
 
-    fn create_client(
-        &self,
-        _addr: SocketAddr,
-        stream: IoArc<TcpStream>,
-        token: mio::Token,
-    ) -> Option<Self::ClientContext> {
+    fn create_client(&self, _addr: SocketAddr, notifier: Notifier) -> Option<Self::ClientContext> {
         let id = self.client_count.load(Ordering::Relaxed);
         self.client_count.store(id + 1, Ordering::Relaxed);
-        Some(StratumClient::new(stream, token, id))
+        Some(StratumClient::new(notifier, id))
     }
 
-    fn delete_client(&self, _addr: SocketAddr, ctx: Arc<Mutex<Self::ClientContext>>, _token: Token) {
+    fn delete_client(&self, ctx: Arc<Mutex<Self::ClientContext>>) {
         let lock = ctx.lock().unwrap();
-        self.subscribed_clients.lock().unwrap().remove(&lock.token);
+        if let Some(subkey) = lock.subscription_key {
+            self.subscribed_clients.lock().unwrap().remove(subkey);
+        }
+
+        // info!("Deleted client with token: {}", _token.0);
+    }
+
+    fn create_ptx(&self) -> Self::ProcessingContext {
+        Self::ProcessingContext {
+            jobs: self.job_manager.read().unwrap().get_jobs(),
+        }
+    }
+
+    fn poll_notifications(&self) -> (MutexGuard<Slab<Notifier>>, Self::Request) {
+        std::thread::sleep(self.config.job_poll_interval);
+        // info!("Polling job...");
+
+        loop {
+            if let Some(job) = self.fetch_new_job(&self.daemon_cli) {
+                let msg = job.get_broadcast_message();
+                let lock = self.subscribed_clients.lock().unwrap();
+                return (lock, msg);
+            }
+        }
     }
 }
 

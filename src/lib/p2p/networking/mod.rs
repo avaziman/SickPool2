@@ -12,3 +12,5 @@ pub mod block_manager;
 pub mod peer_manager;
 pub mod messages;
 pub mod pplns;
+pub mod target_manager;
+pub mod config;

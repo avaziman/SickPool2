@@ -1,13 +1,17 @@
+use display_bytes::display_bytes_string;
 use io_arc::IoArc;
+use itertools::Itertools;
 use log::warn;
 use mio::net::TcpStream;
 use serde_json::Value;
+use slab::Slab;
 use std::{
-    net::{SocketAddr},
-    sync::{Arc, Mutex},
+    net::SocketAddr,
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use crate::{
+    server::Notifier,
     sickrpc::{ResultOrErr, RpcReqBody, RpcRequest, RpcResponse},
     stratum::protocol::Discriminant,
 };
@@ -17,7 +21,8 @@ pub trait Protocol {
     type Response;
     type Config;
     type ClientContext: std::fmt::Debug + Sync + Send;
-    type ProcessingContext: Default;
+    type ProcessingContext;
+    type Notification;
 
     fn new(conf: Self::Config) -> Self;
     fn process_request(
@@ -28,20 +33,15 @@ pub trait Protocol {
     ) -> Self::Response;
 
     // perhaps sent connection count along, to possibly reject based on
-    fn create_client(
-        &self,
-        addr: SocketAddr,
-        stream: IoArc<TcpStream>,
-        token: mio::Token,
-    ) -> Option<Self::ClientContext>;
+    fn create_client(&self, addr: SocketAddr, notifier: Notifier) -> Option<Self::ClientContext>;
 
-    fn delete_client(
-        &self,
-        addr: SocketAddr,
-        ctx: Arc<Mutex<Self::ClientContext>>,
-        token: mio::Token,
-    );
+    fn delete_client(&self, ctx: Arc<Mutex<Self::ClientContext>>);
     fn client_conncted(&self, _stream: IoArc<TcpStream>, _ctx: Arc<Mutex<Self::ClientContext>>) {}
+
+    fn create_ptx(&self) -> Self::ProcessingContext;
+    fn poll_notifications(&self) -> (MutexGuard<Slab<Notifier>>, Self::Request) {
+        loop {}
+    }
 }
 pub struct JsonRpcProtocol<UP> {
     pub up: UP,
@@ -52,15 +52,14 @@ pub struct JsonRpcProtocol<UP> {
 impl<UP, E> Protocol for JsonRpcProtocol<UP>
 where
     E: std::fmt::Display + Discriminant,
-    UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>>,
+    UP: Protocol<Request = RpcReqBody, Response = Result<Value, E>, Notification = RpcReqBody>,
 {
     type Request = Vec<u8>;
-    // type Response = RpcResponse;
     type Response = Vec<u8>;
     type Config = UP::Config;
     type ClientContext = UP::ClientContext;
-    // cloned per processing thread
     type ProcessingContext = UP::ProcessingContext;
+    type Notification = Vec<u8>;
 
     fn new(conf: Self::Config) -> Self {
         Self { up: UP::new(conf) }
@@ -79,7 +78,11 @@ where
                     .process_request((rpc_request.method, rpc_request.params), ctx, ptx),
             ),
             Err(e) => {
-                warn!("Failed to parse request: {}", e);
+                warn!(
+                    "Failed to parse jsonrpc request: {}, req: {:?}",
+                    e,
+                    display_bytes_string(&req)
+                );
                 RpcResponse {
                     id: None,
                     res_or_err: ResultOrErr::Error((0, String::from("Bad JSON RPC request"), None)),
@@ -92,22 +95,31 @@ where
     }
 
     // perhaps save the format of given client requests later... or smt
-    fn create_client(
-        &self,
-        addr: SocketAddr,
-        stream: IoArc<TcpStream>,
-        token: mio::Token,
-    ) -> Option<Self::ClientContext> {
-        self.up.create_client(addr, stream, token)
+    fn create_client(&self, addr: SocketAddr, notifier: Notifier) -> Option<Self::ClientContext> {
+        self.up.create_client(addr, notifier)
     }
 
-    fn delete_client(
-        &self,
-        addr: SocketAddr,
-        ctx: Arc<Mutex<Self::ClientContext>>,
-        token: mio::Token,
-    ) {
-        self.up.delete_client(addr, ctx, token)
+    fn poll_notifications(&self) -> (MutexGuard<Slab<Notifier>>, Self::Request) {
+        let (notifiers, (method, params)) = self.up.poll_notifications();
+
+        (
+            notifiers,
+            serde_json::to_vec(&RpcRequest {
+                params,
+                method,
+                id: None,
+                jsonrpc: None,
+            })
+            .unwrap(),
+        )
+    }
+
+    fn delete_client(&self, ctx: Arc<Mutex<Self::ClientContext>>) {
+        self.up.delete_client(ctx)
+    }
+
+    fn create_ptx(&self) -> Self::ProcessingContext {
+        self.up.create_ptx()
     }
 }
 

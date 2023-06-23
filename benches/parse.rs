@@ -36,7 +36,7 @@ fn criterion_benchmark2(c: &mut Criterion) {
 
     c.bench_function("getdiff", move |b| {
         b.iter(|| {
-            get_diff(check);
+            get_diff(&check);
             check = check.wrapping_add(&U256::ONE);
         })
     });

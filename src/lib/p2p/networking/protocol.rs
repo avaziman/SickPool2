@@ -2,11 +2,14 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     path::Path,
+    str::FromStr,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
-use bitcoincore_rpc::bitcoin::{CompactTarget, PublicKey, Target};
+use bitcoin::address::NetworkUnchecked;
 use crypto_bigint::{Encoding, U256};
+use duration_str::deserialize_duration;
 use io_arc::IoArc;
 use log::{info, warn};
 use mio::{net::TcpStream, Token};
@@ -14,40 +17,39 @@ use mio::{net::TcpStream, Token};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-use crate::{protocol::Protocol, server::respond, stratum::header::BlockHeader};
+use crate::{protocol::Protocol, server::{respond, Notifier}, stratum::header::BlockHeader};
 
 use super::{
     block::Block,
     block_manager::BlockManager,
-    hard_config::{CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION},
+    difficulty::get_diff,
+    hard_config::{
+        CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_SHARE_UNITS,
+    },
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
-    pplns::{Score, ScoreChanges, WindowPPLNS},
-    utils::time_now_ms,
+    pplns::{MyBtcAddr, Score, ScoreChanges, WindowPPLNS},
+    target_manager::TargetManager,
+    utils::time_now_ms, config::ConfigP2P,
 };
 use bincode::{self};
 
 pub struct ProtocolP2P<BlockT> {
     pub pplns_window: Mutex<WindowPPLNS<BlockT>>,
-    pub addresses_map: HashMap<Address, AddressInfo>,
     pub conf: ConfigP2P,
     hello_message: Messages<BlockT>,
-    pub peers: Mutex<HashMap<Token, IoArc<TcpStream>>>,
+    pub peers: Mutex<HashMap<Token, Notifier>>,
     data_dir: Box<Path>,
     pub peer_manager: PeerManager,
     pub block_manager: BlockManager<BlockT>,
+    pub target_manager: Mutex<TargetManager>,
 }
 
-pub type Address = PublicKey;
+pub type Address = MyBtcAddr;
 pub type Reward = u64;
 
-pub struct AddressInfo {
-    last_share_entry: u32,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
-// p2pool difficulty (bits) is encoded inside block generation tx
 pub struct ShareP2P<BlockT> {
     pub block: BlockT,
     pub encoded: CoinabseEncodedP2P,
@@ -59,59 +61,30 @@ pub struct ShareP2P<BlockT> {
 impl<BlockT: Block> ShareP2P<BlockT> {
     pub fn genesis() -> Self {
         let block = BlockT::genesis();
-        let genesis_target = block.get_header().get_target();
 
         Self {
-            block,
             encoded: CoinabseEncodedP2P {
-                diff_bits: Target::from_le_bytes(genesis_target.to_le_bytes()).to_compact_lossy(),
-                rewards: Default::default(),
-                height: 0,
+                prev_hash: U256::ZERO,
             },
-            score_changes: Default::default(),
+            score_changes: ScoreChanges {
+                added: Vec::new(),
+                removed: Vec::new(),
+            },
+            block,
         }
     }
 }
 
+// p2pool difficulty (bits) is encoded inside block generation tx
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CoinabseEncodedP2P {
-    rewards: Vec<(Address, Reward)>,
-    pub diff_bits: CompactTarget,
-    pub height: u32,
+    pub prev_hash: U256,
 }
 
 impl CoinabseEncodedP2P {
-    fn get_target(&self) -> U256 {
-        U256::from_le_bytes(Target::from_compact(self.diff_bits).to_le_bytes())
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ConfigP2P {
-    pub peer_connections: u32,
-    pub consensus: ConsensusConfigP2P,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ConsensusConfigP2P {
-    pub difficulty_adjust: u32,
-}
-
-impl Default for ConsensusConfigP2P {
-    fn default() -> Self {
-        Self {
-            difficulty_adjust: 10,
-        }
-    }
-}
-
-impl Default for ConfigP2P {
-    fn default() -> Self {
-        Self {
-            peer_connections: 32,
-            consensus: ConsensusConfigP2P::default(),
-        }
-    }
+    // fn get_target(&self) -> U256 {
+    //     U256::from_le_bytes(Target::from_compact(self.diff_bits).to_le_bytes())
+    // }
 }
 
 impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
@@ -120,12 +93,16 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
     type Config = (ConfigP2P, Box<Path>, u16); // data dir, listening port
     type ClientContext = Peer;
     type ProcessingContext = ();
+    type Notification =  ();
 
     fn new(conf: Self::Config) -> Self {
         let data_dir = conf.1;
         Self {
-            addresses_map: HashMap::new(),
             pplns_window: Mutex::new(WindowPPLNS::new()),
+            target_manager: Mutex::new(TargetManager::new::<BlockT>(
+                conf.0.consensus.block_time,
+                conf.0.consensus.diff_adjust_blocks,
+            )),
             peers: Mutex::new(HashMap::new()),
             conf: conf.0,
             hello_message: Messages::Hello(Hello::new(conf.2)),
@@ -160,16 +137,15 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
     fn create_client(
         &self,
         address: SocketAddr,
-        stream: IoArc<TcpStream>,
-        token: mio::Token,
+        notifier: Notifier,
     ) -> Option<Self::ClientContext> {
-        let mut lock = self.peers.lock().unwrap();
-        let connection_count = lock.len() as u32;
+        let mut peer_lock = self.peers.lock().unwrap();
+        let connection_count = peer_lock.len() as u32;
 
         if connection_count >= self.conf.peer_connections {
             None
         } else {
-            lock.insert(token, stream);
+            // peer_lock.insert(token, notifier);
 
             Some(self.peer_manager.load_connecting_peer(address))
         }
@@ -177,23 +153,24 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
 
     fn client_conncted(&self, stream: IoArc<TcpStream>, ctx: Arc<Mutex<Self::ClientContext>>) {
         info!("Sent hello to: {}", ctx.lock().unwrap().address);
-        Self::send_message(&self.hello_message, stream);
+        Self::send_message(&self.hello_message, stream.as_ref());
     }
 
     // TODO clean
     fn delete_client(
         &self,
-        _addr: SocketAddr,
         ctx: Arc<Mutex<Self::ClientContext>>,
-        token: mio::Token,
     ) {
-        self.peers.lock().unwrap().remove(&token);
+        // TODO: CHECK
+        // self.peers.lock().unwrap().remove(&token);
 
         let mut lock = ctx.lock().unwrap();
         lock.last_connection_fail = Some(time_now_ms());
         lock.connected = false;
         self.peer_manager.save_peer(&*lock);
     }
+
+    fn create_ptx(&self) -> Self::ProcessingContext {}
 }
 
 impl<BlockT: Block> ProtocolP2P<BlockT> {
@@ -255,39 +232,34 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
         ctx: Arc<Mutex<Peer>>,
         share: BlockT,
     ) -> Option<Messages<BlockT>> {
-        let tip = self.block_manager.tip();
-        let height = self.block_manager.height();
-        let share = match share.into_p2p(tip, height) {
-            Some(s) => s,
-            None => {
-                warn!("Invalid p2p block provided.");
-                return None;
+        let target = *self.target_manager.lock().unwrap().target();
+
+        match self.block_manager.process_share(share, &target) {
+            Ok(pshare) => {
+                // check if valid mainnet block
+                // let main_target = pshare.inner.block.get_header().get_target();
+
+                info!(
+                    "Accepted new share submission from peer: {}, hash: {}",
+                    ctx.lock().unwrap().address,
+                    &pshare.hash
+                );
+
+                self.pplns_window.lock().unwrap().add(pshare);
             }
-        };
-
-        let hash = share.block.get_header().get_hash();
-        if hash > tip.encoded.get_target() {
-            warn!("Insufficient diffiuclty");
-
-            return None;
+            Err(e) => {
+                info!(
+                    "Rejected share from {} for {:?}",
+                    ctx.lock().unwrap().address,
+                    e
+                )
+            }
         }
-
-        // TODO: make share verifying read only and appropriate locking... rwlock
-        if let Err(e) = self.pplns_window.lock().unwrap().add(share, hash, height) {
-            warn!("Score changes are unbalanced...");
-            return None;
-        }
-
-        info!(
-            "Accepted new share submission from peer: {}, hash: {}",
-            ctx.lock().unwrap().address,
-            &hash
-        );
 
         None
     }
 
-    pub fn send_message(message: &Messages<BlockT>, stream: IoArc<TcpStream>) {
+    pub fn send_message(message: &Messages<BlockT>, stream: &TcpStream) {
         respond(stream, Self::serialize_message(message).as_ref())
     }
 

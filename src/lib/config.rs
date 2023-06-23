@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     p2p::networking::{
         hard_config::{DEFAULT_P2P_PORT, DEFAULT_STRATUM_PORT},
-        protocol::ConfigP2P,
+        config::ConfigP2P,
     },
     stratum::config::StratumConfig,
 };

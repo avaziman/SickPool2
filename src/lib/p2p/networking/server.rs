@@ -10,7 +10,8 @@ use bitcoincore_rpc::bitcoin;
 
 
 
-use super::protocol::{ConfigP2P, ProtocolP2P};
+use super::config::ConfigP2P;
+use super::protocol::{ProtocolP2P};
 
 
 use crate::protocol::Protocol;

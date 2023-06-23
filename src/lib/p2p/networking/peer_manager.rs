@@ -101,7 +101,7 @@ impl PeerManager {
 
     fn get_peer_path(&self, address: IpAddr) -> Box<Path> {
         let mut path = self.peers_dir.to_path_buf();
-        path.push(address.to_string());
+        path.push(address.to_string() + ".json");
         path.set_extension("json");
         path.into_boxed_path()
     }

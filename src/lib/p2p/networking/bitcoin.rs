@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 
+use bitcoin::address::{self, NetworkChecked};
 use bitcoincore_rpc::bitcoin::block::Version;
 
 use bitcoincore_rpc::bitcoin::hash_types::TxMerkleNode;
 use bitcoincore_rpc::bitcoin::hashes::Hash;
-use bitcoincore_rpc::bitcoin::psbt::Output;
-use bitcoincore_rpc::bitcoin::{self, block, CompactTarget, TxOut};
+
+use bitcoincore_rpc::bitcoin::{self, block, CompactTarget, Network, TxOut};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetBlockTemplateResult;
 use itertools::Itertools;
+use serde_json::from_slice;
 
 use super::block::Block;
-use super::hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS};
-use super::pplns::{Score, ScoreChanges, WindowPPLNS};
+use super::hard_config::PPLNS_SHARE_UNITS;
+use super::pplns::{Score, ScoreChanges, MyBtcAddr};
 use super::protocol::{Address, CoinabseEncodedP2P, ShareP2P};
 
 // fn compare_outputs(o1: &TxOut, o2: &TxOut) -> bool {
@@ -97,6 +99,7 @@ impl Block for block::Block {
 
     fn into_p2p(self, last_p2p: &ShareP2P<Self>, height: u32) -> Option<ShareP2P<Self>> {
         let gen_tx = &self.txdata[0];
+
         let gen_input = &gen_tx.input[0];
         let script = gen_input.script_sig.as_script();
         let height_script = bitcoin::consensus::encode::VarInt(height as u64).len();
@@ -107,8 +110,8 @@ impl Block for block::Block {
             Err(_) => return None,
         };
 
-        let current_scores: HashMap<bitcoin::PublicKey, u64> = self.deserialize_rewards()?;
-        let last_scores: HashMap<bitcoin::PublicKey, u64> = last_p2p.block.deserialize_rewards()?;
+        let current_scores = self.deserialize_rewards()?;
+        let last_scores = last_p2p.block.deserialize_rewards()?;
         let score_changes = ScoreChanges::new(current_scores, last_scores);
 
         Some(ShareP2P {
@@ -128,9 +131,10 @@ impl Block for block::Block {
 
         for out in gen_outs {
             let score = (out.value * PPLNS_SHARE_UNITS) / gen_reward;
-            let addr = out.script_pubkey.p2wpkh_script_code()?.p2pk_public_key()?;
+            let addr =
+                bitcoin::Address::from_script(out.script_pubkey.as_script(), Network::Bitcoin).unwrap();
 
-            if let Some(exists) = res.insert(addr, score) {
+            if let Some(_exists) = res.insert(MyBtcAddr(addr), score) {
                 // same address twice is unacceptable! bytes are wasted.
                 return None;
             }
@@ -138,4 +142,3 @@ impl Block for block::Block {
         Some(res)
     }
 }
-

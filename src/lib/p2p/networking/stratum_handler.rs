@@ -1,27 +1,35 @@
-use std::sync::{Arc, atomic::Ordering};
-
+use std::sync::Arc;
 
 use crypto_bigint::U256;
-
+use log::info;
 
 use super::{
     block::Block,
     protocol::{Address, ProtocolP2P},
 };
-use crate::stratum::{handler::StratumHandler};
+use crate::stratum::handler::StratumHandler;
 
 impl<BlockT> StratumHandler<BlockT> for ProtocolP2P<BlockT>
 where
     BlockT: Block,
 {
-    fn on_valid_share(&self, _address: Address, _share: &BlockT, _hash: U256) {
+    fn on_valid_share(&self, _address: Address, block: &BlockT, hash: U256) {
+        let target = *self.target_manager.lock().unwrap().target();
+        if hash > target {
+            return;
+        }
+
+        self.block_manager.process_share(block.clone(), &target).unwrap();
     }
 
-    fn on_new_block(&self, height: u32, _header: &BlockT) {
-        self.block_manager.new_block(height);
-        
+    fn on_new_block(&self, height: u32, block: &BlockT) {
+        self.block_manager.new_block(height, block);
+        let mut target_lock = self.target_manager.lock().unwrap();
+        target_lock.adjust(height, block);
+
         let _peer_lock = self.peers.lock().unwrap();
 
+        // info!("Current p2p target: {}", target_lock.target());
         // for (addr, (share, diff)) in &*lock {
         //     let share = ShareP2P {
         //         address: addr.clone(),

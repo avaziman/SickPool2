@@ -1,5 +1,7 @@
 {
   "address": "127.0.0.1:1967",
   "peer_connections": 32,
-  "difficulty_adjust": 10
+  "block_time": "1s",
+  "diff_adjust_blocks": 16,
+  "genesis_height": 0
 }

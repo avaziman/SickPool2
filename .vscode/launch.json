@@ -24,16 +24,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'SickPool2'",
+            "name": "Debug unit tests in executable 'sickpool2'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=SickPool2",
-                    "--package=SickPool2"
+                    "--bin=sickpool2",
+                    "--package=sickpool2"
                 ],
                 "filter": {
-                    "name": "SickPool2",
+                    "name": "sickpool2",
                     "kind": "bin"
                 }
             },

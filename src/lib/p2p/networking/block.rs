@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 
 use crate::stratum::header::BlockHeader;
 
-use super::{protocol::{ShareP2P, Address}, pplns::{WindowPPLNS, Score}};
+use super::{protocol::{ShareP2P, Address}, pplns::{Score}};
 
 pub trait Block : Clone + std::fmt::Debug + Serialize + DeserializeOwned{
     type HeaderT: BlockHeader;

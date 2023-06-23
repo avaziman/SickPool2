@@ -7,8 +7,8 @@ use super::{hard_config::{PPLNS_SHARE_UNITS_256}, pplns::Score};
 static DIFF1: U256 =
     U256::from_be_hex("00000000FFFF0000000000000000000000000000000000000000000000000000");
 
-pub fn get_diff(hash: U256) -> Score {
-    let hash = NonZero::new(hash).unwrap();
+pub fn get_diff(hash: &U256) -> Score {
+    let hash = NonZero::new(*hash).unwrap();
     let (quotient, _remainder) = DIFF1
         .checked_mul(&PPLNS_SHARE_UNITS_256)
         .unwrap()
@@ -32,7 +32,7 @@ mod tests {
         let check =
             U256::from_be_hex("00000000000404CB000000000000000000000000000000000000000000000000");
 
-        let result = get_diff(check);
+        let result = get_diff(&check);
         assert_eq!(result, 16307420938);
     }
 }

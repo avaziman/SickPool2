@@ -4,14 +4,18 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use bitcoincore_rpc::bitcoin::hashes::Hash;
+use bitcoin::address::NetworkUnchecked;
+use bitcoin::Network;
 use crypto_bigint::U256;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 use crate::stratum::header::BlockHeader;
+use serde_with::DisplayFromStr;
 
 use super::{
     block::Block,
+    block_manager::ProcessedShare,
     difficulty::get_diff,
     hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
     protocol::{Address, ShareP2P},
@@ -19,10 +23,26 @@ use super::{
 
 pub type Score = u64;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ScoreChanges {
     pub added: Vec<(Address, Score)>,
     pub removed: Vec<(Address, Score)>,
+}
+
+#[derive(Serialize, Clone, Debug, Eq, Hash, PartialEq)]
+pub struct MyBtcAddr(pub bitcoin::Address);
+
+impl<'de> Deserialize<'de> for MyBtcAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(MyBtcAddr(
+            bitcoin::Address::<NetworkUnchecked>::deserialize(deserializer)?
+                .require_network(Network::Bitcoin)
+                .unwrap(),
+        ))
+    }
 }
 
 impl ScoreChanges {
@@ -81,25 +101,24 @@ where
     BlockT: Block,
 {
     pub fn new() -> Self {
+        let genesis_entry = WindowEntry {
+            share: ShareP2P::<BlockT>::genesis(),
+            score: PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
+        };
+
         Self {
-            pplns_window: VecDeque::new(),
+            pplns_window: VecDeque::from([genesis_entry]),
             pplns_sum: 0,
             oldest_height: 0,
             address_scores: HashMap::new(),
         }
     }
 
-    pub fn add(&mut self, share: ShareP2P<BlockT>, hash: U256, height: u32) -> Result<(), String> {
-        let diff = get_diff(hash);
-
+    pub fn add(&mut self, pshare: ProcessedShare<BlockT>) {
         let entry = WindowEntry {
-            score: diff * PPLNS_SHARE_UNITS / get_diff(share.block.get_header().get_target()),
-            share,
+            score: pshare.score,
+            share: pshare.inner,
         };
-
-        if !entry.share.score_changes.verify_scores(entry.score) {
-            return Err("Bad scores.".into());
-        }
 
         self.pplns_sum += entry.score;
         self.pplns_window.push_front(entry);
@@ -121,9 +140,10 @@ where
         self.pplns_sum += remaining;
         last_removed.score = remaining;
 
-        self.oldest_height = last_removed.share.encoded.height;
+        // self.oldest_height = last_removed.share.encoded.height;
         self.pplns_window.push_back(last_removed);
-        Ok(())
+
+        debug_assert_eq!(self.pplns_sum, PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS);
     }
 
     pub fn get_modified_pplns(&self) {}
@@ -146,8 +166,40 @@ where
     //     //     }
     //     // }
     // }
+}
 
-    fn get_shares(&self) -> VecDeque<WindowEntry<BlockT>> {
-        self.pplns_window.clone()
+#[cfg(test)]
+pub mod tests {
+    use bitcoincore_rpc::bitcoin;
+    use crypto_bigint::U256;
+
+    use crate::p2p::networking::{
+        block::{self, Block},
+        messages::ShareVerificationError,
+        protocol::{ProcessedShare, ShareP2P},
+    };
+
+    #[test]
+    pub fn parse_genesis_main() {
+        let res = ProcessedShare::process(
+            bitcoin::Block::genesis(),
+            &ShareP2P::<bitcoin::Block>::genesis(),
+            0,
+            &U256::ZERO,
+        );
+
+        assert_eq!(res.err().unwrap(), ShareVerificationError::BadEncoding);
+    }
+
+    #[test]
+    pub fn parse_genesis_p2p() {
+        let res = ProcessedShare::process(
+            ShareP2P::<bitcoin::Block>::genesis().block,
+            &ShareP2P::<bitcoin::Block>::genesis(),
+            0,
+            &U256::ZERO,
+        );
+
+        assert_eq!(res.err().unwrap(), ShareVerificationError::BadEncoding);
     }
 }

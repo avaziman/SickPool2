@@ -14,5 +14,6 @@ pub const PPLNS_SHARE_UNITS_256: U256 = U256::from_u64(PPLNS_SHARE_UNITS);
 
 pub const PPLNS_DIFF_MULTIPLIER: u64 = 5;
 
-
 pub const DEV_ADDRESS_BTC_STR: &str = "bc1q3k7q92qf3hmpdpekz4t9r2e3tszy2g4gv9gwea";
+
+pub const MAX_RETARGET_FACTOR : u64 = 4;

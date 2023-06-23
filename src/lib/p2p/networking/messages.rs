@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ProtocolServerConfig;
 
-use super::{protocol::ConfigP2P, hard_config::CURRENT_VERSION};
+use super::{config::ConfigP2P, hard_config::CURRENT_VERSION};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Messages<BlockT> {
@@ -31,4 +31,14 @@ impl Hello {
             listening_port: port,
         }
     }
+}
+
+
+#[derive(Debug, PartialEq)]
+pub enum ShareVerificationError {
+    BadEncoding,
+    BadTarget,
+    BadRewards,
+    BadLinkMain,
+    BadLinkP2P,
 }

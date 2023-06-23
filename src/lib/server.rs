@@ -1,12 +1,16 @@
+use display_bytes::display_bytes_string;
+use flume::Sender;
 use io_arc::IoArc;
 use log::{info, warn};
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
+use serde::Serialize;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
-use std::net::SocketAddr;
+use std::marker::PhantomData;
+use std::net::{Shutdown, SocketAddr};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
-use threadpool::ThreadPool;
 
 use slab;
 
@@ -27,7 +31,7 @@ pub struct Server<P: Protocol> {
     poll: Poll,
     connections: Slab<Connection<P::ClientContext>>,
     protocol: Arc<P>,
-    tpool: ThreadPool,
+    tx: Sender<(Vec<u8>, IoArc<TcpStream>, Arc<Mutex<P::ClientContext>>)>,
 }
 
 // #[derive(Debug)]
@@ -48,13 +52,16 @@ impl<T> std::fmt::Display for Connection<T> {
     }
 }
 
-pub fn respond(mut stream: IoArc<TcpStream>, msg: &[u8]) {
+pub fn respond(mut stream: &TcpStream, msg: &[u8]) {
     // self.add_client_context(token, t);
     if let Err(e) = stream.write_all(msg) {
         warn!("error responding: {}", e);
     }
     stream.flush().unwrap()
 }
+
+#[derive(Debug, Clone)]
+pub struct Notifier(IoArc<TcpStream>);
 
 // all pools are edge triggered
 impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static> Server<P> {
@@ -68,19 +75,50 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
         info!("Started server on {:?}", conf.address);
 
+        let (tx, rx) = flume::unbounded();
+
+        for i in 0..1 {
+            let rx = rx.clone();
+            let protocol = protocol.clone();
+
+            thread::spawn(move || {
+                let mut ptx = protocol.create_ptx();
+
+                loop {
+                    let (req, writer, ctx): (
+                        Vec<u8>,
+                        IoArc<TcpStream>,
+                        Arc<Mutex<P::ClientContext>>,
+                    ) = rx.recv().unwrap();
+
+                    let now = Instant::now();
+
+                    let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
+
+                    let elapsed = now.elapsed().as_micros();
+                    respond(writer.as_ref(), stratum_resp.as_ref());
+                    info!(
+                        "Processed response: {:?}, in {}us",
+                        display_bytes_string(&stratum_resp),
+                        elapsed
+                    );
+                }
+            });
+        }
+
         Server {
             listener,
             protocol,
             token: SERVER_TOKEN,
             poll: poll,
             connections: Slab::with_capacity(INITIAL_CLIENTS_CAPACITY),
-            tpool: threadpool::Builder::new()
-                .num_threads(8)
-                .thread_stack_size(8_000_000)
-                .thread_name("Server protocol processing thread".into())
-                .build(),
             conf,
+            tx,
         }
+    }
+
+    pub fn notify(notifier: Notifier, msg: &[u8]) {
+        respond(notifier.0.as_ref(), msg)
     }
 
     pub fn get_connection_count(&self) -> usize {
@@ -99,20 +137,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
     pub fn process_requests(&mut self) {
         let requests = self.read_requests();
         for (req, writer, ctx) in requests.into_iter() {
-            let protocol: Arc<P> = self.protocol.clone();
-
-            self.tpool.execute(move || {
-                let mut ptx = P::ProcessingContext::default();
-                // info!("Received request: {:?}", req);
-                let now = Instant::now();
-
-                let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
-
-                let _elapsed = now.elapsed().as_micros();
-                respond(writer, stratum_resp.as_ref());
-
-                // info!("Processed response: {:?}, in {}us", stratum_resp, elapsed);
-            });
+            self.tx.send((req, writer, ctx)).unwrap();
         }
 
         // if !rem_cons.is_empty() {
@@ -124,11 +149,19 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
     // also closes the underlying stream
     fn disconnect(&mut self, token: Token) {
-        let cn = self.connections.remove(token.0);
+        let cn = match self.connections.try_remove(token.0) {
+            Some(k) => k,
+            None => {
+                warn!("Already removed connection {}", token.0);
+                return;
+            }
+        };
+
         info!("Disconnecting connection: {}", cn);
 
-        self.protocol.delete_client(cn.addr, cn.protocol_context, token);
+        self.protocol.delete_client(cn.protocol_context);
 
+        let res = cn.stream.as_ref().shutdown(Shutdown::Both);
         // all ars must be dropped here
     }
 
@@ -169,8 +202,9 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
         }
 
         let stream = IoArc::new(stream);
+        let notifier = Notifier(stream.clone());
 
-        let ctx = match self.protocol.create_client(addr, stream.clone(), token) {
+        let ctx = match self.protocol.create_client(addr, notifier) {
             Some(k) => k,
             None => {
                 return None;
@@ -218,41 +252,50 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
             if event.is_readable() {
                 loop {
-                    match self.read_ready_line(token, &mut removed_cons).take() {
-                        Some(line) => {
-                            let connection = &self.connections[token.0];
-                            lines.push((
-                                line,
-                                connection.stream.clone(),
-                                connection.protocol_context.clone(),
-                            ))
+                    match self.read_ready_line(token) {
+                        Ok(k) => match k {
+                            Some(line) => {
+                                let connection = &self.connections[token.0];
+                                lines.push((
+                                    line,
+                                    connection.stream.clone(),
+                                    connection.protocol_context.clone(),
+                                ))
+                            }
+                            None => break,
+                        },
+                        Err(e) => {
+                            removed_cons.push(token);
+                            break;
                         }
-                        None => break,
                     }
                 }
             }
 
             // TODO: buffer failed writes
             if event.is_writable() {
-                let con = &mut self.connections[token.0];
-                if !con.connected {
-                    match con.stream.as_ref().peer_addr() {
-                        Ok(_k) => {
-                            // connected
-                            con.connected = true;
-                            info!("Connection to {} has been established!", con.addr);
-                            
-                            self.protocol
-                                .client_conncted(con.stream.clone(), con.protocol_context.clone());
-                        }
-                        Err(_e) => {
-                            // connection still pending...
+                if let Some(con) = self.connections.get_mut(token.0) {
+                    eprint!("WRITABLE");
+                    if !con.connected {
+                        match con.stream.as_ref().peer_addr() {
+                            Ok(_k) => {
+                                // connected
+                                con.connected = true;
+                                info!("Connection to {} has been established!", con.addr);
+
+                                self.protocol.client_conncted(
+                                    con.stream.clone(),
+                                    con.protocol_context.clone(),
+                                );
+                            }
+                            Err(_e) => {
+                                // connection still pending...
+                            }
                         }
                     }
                 }
             }
         }
-
         for to_remove in &removed_cons {
             self.disconnect(*to_remove);
         }
@@ -270,7 +313,6 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                         let con = &mut self.connections[t.0];
                         con.connected = false;
                         Some(con.stream.clone())
-
                     }
                     None => None,
                 }
@@ -290,31 +332,35 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
     //     }
     // }
 
-    fn read_ready_line(&mut self, token: Token, to_remove: &mut Vec<Token>) -> Option<Vec<u8>> {
-        let conn = &mut self.connections[token.0];
+    fn read_ready_line(&mut self, token: Token) -> Result<Option<Vec<u8>>, ()> {
+        let conn = match self.connections.get_mut(token.0) {
+            Some(k) => k,
+            None => {
+                warn!("Client needs to be shutdown {}", token.0);
+                return Err(());
+            }
+        };
 
         let mut line = Vec::new();
         match conn.reader.read_until('\n' as u8, &mut line) {
             // disconnect. EOF
             Ok(0) => {
                 warn!("Client EOF: {}", &conn);
-                to_remove.push(token);
-                None
+                return Err(());
             }
             Ok(_) => {
                 // remove delimiter
                 line.pop();
-                Some(line)
+                return Ok(Some(line));
             }
             Err(e) => {
                 match e.kind() {
                     // FINISHED READING or Interrupted
-                    ErrorKind::WouldBlock | ErrorKind::Interrupted => None,
+                    ErrorKind::WouldBlock | ErrorKind::Interrupted => Ok(None),
                     // Other errors we'll consider fatal.
                     _ => {
                         warn!("Error reading: {}", e);
-                        to_remove.push(token);
-                        None
+                        return Err(());
                     }
                 }
             }
