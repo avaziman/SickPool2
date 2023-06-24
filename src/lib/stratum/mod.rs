@@ -6,6 +6,6 @@ pub mod job_manager;
 pub mod config;
 pub mod protocol;
 pub mod stratum_v1;
-pub mod server;
 pub mod common;
 pub mod handler;
+pub mod server;

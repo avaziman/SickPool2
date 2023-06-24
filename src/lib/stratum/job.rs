@@ -3,7 +3,7 @@ use serde_json::json;
 
 use crate::{
     p2p::networking::block::Block,
-    sickrpc::{ResultOrErr, RpcReqBody, RpcRequest},
+    sickrpc::{RpcReqBody},
 };
 
 use super::header::BlockHeader;

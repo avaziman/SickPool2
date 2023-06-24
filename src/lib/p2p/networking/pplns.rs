@@ -6,17 +6,16 @@ use std::collections::{HashMap, VecDeque};
 
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::Network;
-use crypto_bigint::U256;
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 
-use crate::stratum::header::BlockHeader;
-use serde_with::DisplayFromStr;
+use serde::{Deserialize, Serialize};
+
+
+
+
 
 use super::{
     block::Block,
     block_manager::ProcessedShare,
-    difficulty::get_diff,
     hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
     protocol::{Address, ShareP2P},
 };

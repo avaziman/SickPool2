@@ -1,7 +1,7 @@
 // only save tip in memory the rest dump on disk
 // only keep the blocks of the current window.
 
-use std::io::{Read, Write};
+use std::io::{Read};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::{fs, path::Path};

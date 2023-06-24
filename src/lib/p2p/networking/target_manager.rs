@@ -1,11 +1,11 @@
-use std::{ops::Div, time::Duration};
+use std::{time::Duration};
 
 use crypto_bigint::{CheckedMul, U256};
 use log::{info, warn};
 
 use crate::{p2p::networking::hard_config::MAX_RETARGET_FACTOR, stratum::header::BlockHeader};
 
-use super::{block::Block, hard_config};
+use super::{block::Block};
 
 struct Adjustment {
     time: u32,

@@ -1,5 +1,7 @@
 {
   "address": "127.0.0.1:1967",
+  "processing_threads": 2,
+  
   "peer_connections": 32,
   "block_time": "1s",
   "diff_adjust_blocks": 16,

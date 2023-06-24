@@ -38,18 +38,17 @@ pub enum ResultOrErr {
 }
 
 impl RpcResponse {
-    pub fn new<E: std::fmt::Display + Discriminant>(
-        id: Option<u64>,
-        stratum_res: Result<Value, E>,
-    ) -> RpcResponse {
+    pub fn new(id: Option<u64>, res: Value) -> RpcResponse {
         RpcResponse {
             id,
-            res_or_err: match stratum_res {
-                Ok(res) => ResultOrErr::Result(res),
-                Err(e_code) => {
-                    ResultOrErr::Error((e_code.discriminant(), e_code.to_string(), None))
-                }
-            },
+            res_or_err: ResultOrErr::Result(res),
+        }
+    }
+
+    pub fn new_err<E: std::fmt::Display + Discriminant>(id: Option<u64>, e_code: E) -> RpcResponse {
+        RpcResponse {
+            id,
+            res_or_err: ResultOrErr::Error((e_code.discriminant(), e_code.to_string(), None)),
         }
     }
 }

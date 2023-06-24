@@ -4,9 +4,9 @@ use io_arc::IoArc;
 use log::{info, warn};
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
-use serde::Serialize;
+
 use std::io::{BufRead, BufReader, ErrorKind, Write};
-use std::marker::PhantomData;
+
 use std::net::{Shutdown, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -63,6 +63,12 @@ pub fn respond(mut stream: &TcpStream, msg: &[u8]) {
 #[derive(Debug, Clone)]
 pub struct Notifier(IoArc<TcpStream>);
 
+impl Notifier {
+    pub fn notify(&self, msg: &[u8]) {
+        respond(self.0.as_ref(), msg)
+    }
+}
+
 // all pools are edge triggered
 impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static> Server<P> {
     pub fn new(conf: ServerConfig, protocol: Arc<P>) -> Server<P> {
@@ -77,7 +83,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
         let (tx, rx) = flume::unbounded();
 
-        for i in 0..1 {
+        for _ in 0..conf.processing_threads {
             let rx = rx.clone();
             let protocol = protocol.clone();
 
@@ -115,10 +121,6 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
             conf,
             tx,
         }
-    }
-
-    pub fn notify(notifier: Notifier, msg: &[u8]) {
-        respond(notifier.0.as_ref(), msg)
     }
 
     pub fn get_connection_count(&self) -> usize {
@@ -161,7 +163,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
         self.protocol.delete_client(cn.protocol_context);
 
-        let res = cn.stream.as_ref().shutdown(Shutdown::Both);
+        let _res = cn.stream.as_ref().shutdown(Shutdown::Both);
         // all ars must be dropped here
     }
 
@@ -264,7 +266,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                             }
                             None => break,
                         },
-                        Err(e) => {
+                        Err(_e) => {
                             removed_cons.push(token);
                             break;
                         }

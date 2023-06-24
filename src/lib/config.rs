@@ -13,6 +13,7 @@ use crate::{
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ServerConfig {
     pub address: SocketAddr,
+    pub processing_threads: u8,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -28,6 +29,7 @@ impl Default for ProtocolServerConfig<StratumConfig> {
         Self {
             server_config: ServerConfig {
                 address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_STRATUM_PORT),
+                processing_threads: 2,
             },
             protocol_config: StratumConfig::default(),
         }
@@ -39,6 +41,7 @@ impl Default for ProtocolServerConfig<ConfigP2P> {
         Self {
             server_config: ServerConfig {
                 address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_P2P_PORT),
+                processing_threads: 2,
             },
             protocol_config: Default::default(),
         }

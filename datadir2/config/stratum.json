@@ -1,5 +1,6 @@
 {
     "address": "127.0.0.1:34255",
+    "processing_threads": 2,
     "rpc_url": "127.0.0.1:18443",
     "job_poll_interval": "1s"
 }

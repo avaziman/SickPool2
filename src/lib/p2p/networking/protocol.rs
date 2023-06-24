@@ -2,14 +2,12 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     path::Path,
-    str::FromStr,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
-use bitcoin::address::NetworkUnchecked;
-use crypto_bigint::{Encoding, U256};
-use duration_str::deserialize_duration;
+
+use crypto_bigint::{U256};
+
 use io_arc::IoArc;
 use log::{info, warn};
 use mio::{net::TcpStream, Token};
@@ -17,19 +15,18 @@ use mio::{net::TcpStream, Token};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-use crate::{protocol::Protocol, server::{respond, Notifier}, stratum::header::BlockHeader};
+use crate::{protocol::Protocol, server::{respond, Notifier}};
 
 use super::{
     block::Block,
     block_manager::BlockManager,
-    difficulty::get_diff,
     hard_config::{
-        CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_SHARE_UNITS,
+        CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION,
     },
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
-    pplns::{MyBtcAddr, Score, ScoreChanges, WindowPPLNS},
+    pplns::{MyBtcAddr, ScoreChanges, WindowPPLNS},
     target_manager::TargetManager,
     utils::time_now_ms, config::ConfigP2P,
 };
@@ -93,7 +90,6 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
     type Config = (ConfigP2P, Box<Path>, u16); // data dir, listening port
     type ClientContext = Peer;
     type ProcessingContext = ();
-    type Notification =  ();
 
     fn new(conf: Self::Config) -> Self {
         let data_dir = conf.1;
@@ -137,9 +133,9 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
     fn create_client(
         &self,
         address: SocketAddr,
-        notifier: Notifier,
+        _notifier: Notifier,
     ) -> Option<Self::ClientContext> {
-        let mut peer_lock = self.peers.lock().unwrap();
+        let peer_lock = self.peers.lock().unwrap();
         let connection_count = peer_lock.len() as u32;
 
         if connection_count >= self.conf.peer_connections {
@@ -223,7 +219,7 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
 
         match shares {
             Ok(k) => Some(Messages::Shares(k)),
-            Err(e) => Some(Messages::Reject),
+            Err(_e) => Some(Messages::Reject),
         }
     }
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use bitcoin::address::{self, NetworkChecked};
+
 use bitcoincore_rpc::bitcoin::block::Version;
 
 use bitcoincore_rpc::bitcoin::hash_types::TxMerkleNode;
@@ -9,7 +9,7 @@ use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::bitcoin::{self, block, CompactTarget, Network, TxOut};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetBlockTemplateResult;
 use itertools::Itertools;
-use serde_json::from_slice;
+
 
 use super::block::Block;
 use super::hard_config::PPLNS_SHARE_UNITS;
