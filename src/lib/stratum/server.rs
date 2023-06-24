@@ -15,7 +15,6 @@ use super::{config::StratumConfig, job_fetcher::BlockFetcher, stratum_v1::Stratu
 type SProtocol<T> = JsonRpcProtocol<StratumV1<T>>;
 
 pub struct StratumServer<T: BlockFetcher<BlockT = bitcoin::Block>> {
-    protocol: Arc<SProtocol<T>>,
     server: Server<SProtocol<T>>,
 }
 
@@ -42,7 +41,6 @@ where
         });
 
         Self {
-            protocol: protocol.clone(),
             server: Server::new(conf.server_config, protocol),
         }
     }
