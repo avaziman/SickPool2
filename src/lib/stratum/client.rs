@@ -9,7 +9,7 @@ use crate::{p2p::networking::protocol::Address, server::Notifier};
 #[derive(Debug)]
 pub struct StratumClient {
     pub notifier: Notifier,
-    pub extra_nonce: usize,
+    pub extra_nonce: u32,
     pub authorized_workers: HashMap<String, Address>,
     pub submitted_shares: HashSet<u64>,
     pub difficulty: U256,
@@ -17,7 +17,7 @@ pub struct StratumClient {
 }
 
 impl StratumClient {
-    pub fn new(notifier: Notifier, id: usize) -> StratumClient {
+    pub fn new(notifier: Notifier, id: u32) -> StratumClient {
         StratumClient {
             notifier,
             extra_nonce: id,

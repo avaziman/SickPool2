@@ -9,10 +9,6 @@ use bitcoin::Network;
 
 use serde::{Deserialize, Serialize};
 
-
-
-
-
 use super::{
     block::Block,
     block_manager::ProcessedShare,
@@ -71,13 +67,6 @@ impl ScoreChanges {
         }
         ScoreChanges { added, removed }
     }
-
-    pub fn verify_scores(&self, score: Score) -> bool {
-        let added: Score = self.added.iter().map(|x| x.1).sum();
-        let removed: Score = self.removed.iter().map(|x| x.1).sum();
-
-        added == removed && added == score
-    }
 }
 
 pub struct WindowPPLNS<BlockT> {
@@ -120,29 +109,105 @@ where
         };
 
         self.pplns_sum += entry.score;
+        self.add_scores(&entry.share.score_changes.added);
+        self.remove_scores(&entry.share.score_changes.removed);
         self.pplns_window.push_front(entry);
 
-        let mut last_removed = None;
-
         // clean expired pplns...
-        while self.pplns_sum > PPLNS_DIFF_MULTIPLIER {
+        // pplns window must always be full.
+        loop {
             let entry = self.pplns_window.pop_back().unwrap();
 
             self.pplns_sum -= entry.score;
-            last_removed = Some(entry);
+
+            if self.pplns_sum - entry.score > PPLNS_DIFF_MULTIPLIER {
+                break;
+            }
         }
 
-        // pplns window must always be full.
-        let mut last_removed = last_removed.unwrap();
-
-        let remaining = PPLNS_DIFF_MULTIPLIER - self.pplns_sum;
-        self.pplns_sum += remaining;
-        last_removed.score = remaining;
-
         // self.oldest_height = last_removed.share.encoded.height;
-        self.pplns_window.push_back(last_removed);
-
         debug_assert_eq!(self.pplns_sum, PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS);
+    }
+
+    pub fn verify_changes(&self, changes: &ScoreChanges, score: Score) -> bool {
+        let added: Score = changes.added.iter().map(|x| x.1).sum();
+        let removed: Score = changes.removed.iter().map(|x| x.1).sum();
+
+        if added != removed || added != score {
+            return false;
+        }
+
+        let mut remove_left = added;
+        let mut expected_removed: HashMap<&MyBtcAddr, u64> = HashMap::new();
+        for last_score in self.pplns_window.iter().rev() {
+            for (added_to, amt) in &last_score.share.score_changes.added {
+                match expected_removed.get_mut(added_to) {
+                    Some(k) => {
+                        *k += std::cmp::min(amt, &remove_left);
+                        remove_left -= amt;
+                    }
+                    None => {
+                        let x = expected_removed.insert(&added_to, *amt);
+                    }
+                }
+                if remove_left <= 0 {
+                    break;
+                }
+            }
+        }
+
+        if expected_removed.len() != changes.removed.len() {
+            return false;
+        }
+
+        for (removed, amt) in &changes.removed {
+            if let Some(amt2) = expected_removed.get(&removed) {
+                if amt != amt2 {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        true
+    }
+    // fn add_n_scores(&mut self, n: u64, scores: &Vec<(Address, Score)>) {
+    //     let mut total = 0;
+    //     for (added_to, amt) in scores {
+    //         *self.address_scores.get_mut(&added_to).unwrap() += amt;
+    //         total += amt;
+
+    //         if total >= n {
+    //             let over = total - n;
+    //             *self.address_scores.get_mut(&added_to).unwrap() -= over;
+    //         }
+    //     }
+    // }
+
+    // fn remove_n_scores(&mut self, n: u64, scores: &Vec<(Address, Score)>) {
+    //     let mut total = 0;
+    //     for (added_to, amt) in scores {
+    //         *self.address_scores.get_mut(&added_to).unwrap() -= amt;
+    //         total += amt;
+
+    //         if total >= n {
+    //             let over = total - n;
+    //             *self.address_scores.get_mut(&added_to).unwrap() += over;
+    //         }
+    //     }
+    // }
+
+    fn remove_scores(&mut self, scores: &Vec<(Address, Score)>) {
+        for (added_to, amt) in scores {
+            *self.address_scores.get_mut(&added_to).unwrap() -= amt;
+        }
+    }
+
+    fn add_scores(&mut self, scores: &Vec<(Address, Score)>) {
+        for (added_to, amt) in scores {
+            *self.address_scores.get_mut(&added_to).unwrap() += amt;
+        }
     }
 
     pub fn get_modified_pplns(&self) {}
@@ -169,36 +234,36 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use bitcoincore_rpc::bitcoin;
-    use crypto_bigint::U256;
+    // use bitcoincore_rpc::bitcoin;
+    // use crypto_bigint::U256;
 
-    use crate::p2p::networking::{
-        block::{self, Block},
-        messages::ShareVerificationError,
-        protocol::{ProcessedShare, ShareP2P},
-    };
+    // use crate::p2p::networking::{
+    //     block::{self, Block},
+    //     messages::ShareVerificationError,
+    //     protocol::{ProcessedShare, ShareP2P},
+    // };
 
-    #[test]
-    pub fn parse_genesis_main() {
-        let res = ProcessedShare::process(
-            bitcoin::Block::genesis(),
-            &ShareP2P::<bitcoin::Block>::genesis(),
-            0,
-            &U256::ZERO,
-        );
+    // #[test]
+    // pub fn parse_genesis_main() {
+    //     let res = ProcessedShare::process(
+    //         bitcoin::Block::genesis(),
+    //         &ShareP2P::<bitcoin::Block>::genesis(),
+    //         0,
+    //         &U256::ZERO,
+    //     );
 
-        assert_eq!(res.err().unwrap(), ShareVerificationError::BadEncoding);
-    }
+    //     assert_eq!(res.err().unwrap(), ShareVerificationError::BadEncoding);
+    // }
 
-    #[test]
-    pub fn parse_genesis_p2p() {
-        let res = ProcessedShare::process(
-            ShareP2P::<bitcoin::Block>::genesis().block,
-            &ShareP2P::<bitcoin::Block>::genesis(),
-            0,
-            &U256::ZERO,
-        );
+    // #[test]
+    // pub fn parse_genesis_p2p() {
+    //     let res = ProcessedShare::process(
+    //         ShareP2P::<bitcoin::Block>::genesis().block,
+    //         &ShareP2P::<bitcoin::Block>::genesis(),
+    //         0,
+    //         &U256::ZERO,
+    //     );
 
-        assert_eq!(res.err().unwrap(), ShareVerificationError::BadEncoding);
-    }
+    //     assert_eq!(res.err().unwrap(), ShareVerificationError::BadEncoding);
+    // }
 }

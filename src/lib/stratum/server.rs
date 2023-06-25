@@ -34,7 +34,7 @@ where
             let protocol = protocol_poll_cp;
             loop {
                 thread::sleep(job_poll_interval);
-                info!("Polling job...");
+                // info!("Polling job...");
 
                 protocol.up.fetch_new_job(&protocol.up.daemon_cli);
             }

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-
+use bitcoin::absolute::LockTime;
+use bitcoin::merkle_tree::calculate_root_inline;
+use bitcoin::psbt::Output;
+use bitcoin::{OutPoint, ScriptBuf, Sequence, Transaction, TxIn, Witness};
 use bitcoincore_rpc::bitcoin::block::Version;
 
 use bitcoincore_rpc::bitcoin::hash_types::TxMerkleNode;
@@ -10,15 +13,16 @@ use bitcoincore_rpc::bitcoin::{self, block, CompactTarget, Network, TxOut};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetBlockTemplateResult;
 use itertools::Itertools;
 
-
 use super::block::Block;
-use super::hard_config::PPLNS_SHARE_UNITS;
-use super::pplns::{Score, ScoreChanges, MyBtcAddr};
+use super::hard_config::{GENERATION_GRAFFITI, PPLNS_SHARE_UNITS};
+use super::pplns::{MyBtcAddr, Score, ScoreChanges};
 use super::protocol::{Address, CoinabseEncodedP2P, ShareP2P};
 
 // fn compare_outputs(o1: &TxOut, o2: &TxOut) -> bool {
 //     o1.value == o2.value && o1.script_pubkey == o2.script_pubkey
 // }
+
+pub const COINB1_SIZE: usize = 4 + 1 /* one input */+ 32 + 4 + 1 + 4 /* height bytes amount will remain same for 300 years */ + GENERATION_GRAFFITI.len();
 
 impl Block for block::Block {
     type HeaderT = block::Header;
@@ -29,65 +33,64 @@ impl Block for block::Block {
         bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Bitcoin)
     }
 
-    fn from_block_template(template: &GetBlockTemplateResult) -> Self {
-        Self {
-            header: Self::HeaderT {
-                version: Version::from_consensus(template.version as i32),
-                prev_blockhash: template.previous_block_hash,
-                merkle_root: TxMerkleNode::from_raw_hash(Hash::all_zeros()),
-                time: template.min_time as u32,
-                bits: CompactTarget::from_consensus(u32::from_be_bytes(
-                    template.bits.clone().try_into().unwrap(),
-                )),
-                nonce: 0,
-            },
-            txdata: template
-                .transactions
-                .iter()
-                .map(|txr| bitcoin::consensus::deserialize(&txr.raw_tx).unwrap())
-                .collect_vec(),
+    fn from_block_template(
+        template: &GetBlockTemplateResult,
+        vout: &HashMap<Address, u64>,
+    ) -> (Self, Vec<[u8; 32]>) {
+        let output = vout
+            .iter()
+            .map(|(addr, amount)| TxOut {
+                value: *amount,
+                script_pubkey: addr.0.script_pubkey(),
+            })
+            .collect_vec();
+
+        let height = template.height;
+        let coinbase_tx = Transaction {
+            version: 2,
+            lock_time: LockTime::ZERO,
+            input: Vec::from([TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: ScriptBuf::builder()
+                    .push_int(height as i64)
+                    .push_slice(GENERATION_GRAFFITI)
+                    .into_script(),
+                sequence: Sequence::max_value(),
+                witness: Witness::new(),
+            }]),
+            output,
+        };
+
+        let mut txs = Vec::with_capacity(template.transactions.len() + 1);
+        txs.push(coinbase_tx);
+
+        let tx_hashes = txs.iter().map(|t| t.txid()).collect_vec();
+
+        for i in &template.transactions {
+            txs.push(bitcoin::consensus::deserialize(&i.raw_tx).unwrap());
         }
+
+        (
+            Self {
+                header: Self::HeaderT {
+                    version: Version::from_consensus(template.version as i32),
+                    prev_blockhash: template.previous_block_hash,
+                    merkle_root: TxMerkleNode::from_byte_array(
+                        calculate_root_inline(&mut tx_hashes.clone())
+                            .unwrap()
+                            .to_byte_array(),
+                    ),
+                    time: template.min_time as u32,
+                    bits: CompactTarget::from_consensus(u32::from_be_bytes(
+                        template.bits.clone().try_into().unwrap(),
+                    )),
+                    nonce: 0,
+                },
+                txdata: txs,
+            },
+            tx_hashes.iter().map(|x| x.to_byte_array()).collect_vec(),
+        )
     }
-
-    // fn verify_coinbase_rewards(&self, shares: &WindowPPLNS<Self>, share: ShareP2P<Self>) -> bool {
-    //     let coinbase = match self.coinbase() {
-    //         Some(k) => k,
-    //         None => return false,
-    //     };
-
-    //     let last_block = shares.pplns_window[0].share.block;
-    //     let last_outputs = last_block.txdata[0].output;
-    //     let first_old_tx_out = last_outputs[0];
-
-    //     let new_outputs = last_outputs;
-
-    //     let reward: u64 = coinbase.output.iter().map(|o| o.value).sum();
-
-    //     for (old_out, new_out) in last_outputs.iter().zip(new_outputs) {}
-    //     // let mut removed_outs = Vec::new();
-
-    //     // let last_outputs_it = last_outputs.iter();
-    //     // for i in 0..(coinbase.output.len() - added_outs.len()) {
-    //     //     let out = coinbase.output[]
-    //     //     let last_out = match last_outputs_it.next() {
-    //     //         Some(k) => k,
-    //     //         None => return false,
-    //     //     };
-
-    //     //     if !compare_outputs(last_out, out) {
-    //     //         removed_outs.push(last_out);
-
-    //     //     }
-    //     // }
-
-    //     // for (i, out) in coinbase.output.iter().enumerate() {
-    //     //     if out.value != shares.get_reward(i, reward) {
-    //     //         return false;
-    //     //     }
-    //     // }
-
-    //     true
-    // }
 
     fn get_header_mut(&mut self) -> &mut Self::HeaderT {
         &mut self.header
@@ -131,11 +134,14 @@ impl Block for block::Block {
 
         for out in gen_outs {
             let score = (out.value * PPLNS_SHARE_UNITS) / gen_reward;
-            let addr =
-                bitcoin::Address::from_script(out.script_pubkey.as_script(), Network::Bitcoin).unwrap();
-
-            if let Some(_exists) = res.insert(MyBtcAddr(addr), score) {
-                // same address twice is unacceptable! bytes are wasted.
+            if let Ok(addr) =
+                bitcoin::Address::from_script(out.script_pubkey.as_script(), Network::Bitcoin)
+            {
+                if let Some(_exists) = res.insert(MyBtcAddr(addr), score) {
+                    // same address twice is unacceptable! bytes are wasted.
+                    return None;
+                }
+            } else {
                 return None;
             }
         }

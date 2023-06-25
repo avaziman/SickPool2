@@ -1,7 +1,8 @@
 // only save tip in memory the rest dump on disk
 // only keep the blocks of the current window.
 
-use std::io::{Read};
+use std::collections::HashMap;
+use std::io::Read;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::{fs, path::Path};
@@ -14,7 +15,8 @@ use crate::stratum::header::BlockHeader;
 use super::difficulty::get_diff;
 use super::hard_config::PPLNS_SHARE_UNITS;
 use super::messages::ShareVerificationError;
-use super::pplns::Score;
+use super::pplns::{Score, WindowPPLNS};
+use super::protocol::Address;
 use super::{block::Block, protocol::ShareP2P};
 
 pub struct BlockManager<T> {
@@ -40,7 +42,7 @@ impl<T: Block> BlockManager<T> {
 
         let blocks_dir = data_dir.into_boxed_path();
 
-        if let Err(e) = fs::create_dir(&blocks_dir){
+        if let Err(e) = fs::create_dir(&blocks_dir) {
             if e.kind() != std::io::ErrorKind::AlreadyExists {
                 panic!("Failed to create blocks dir");
             }
@@ -58,6 +60,7 @@ impl<T: Block> BlockManager<T> {
         &self,
         block: T,
         target: &U256,
+        window: &WindowPPLNS<T>,
     ) -> Result<ProcessedShare<T>, ShareVerificationError> {
         let p2p_tip = &self.p2p_tip;
 
@@ -90,7 +93,7 @@ impl<T: Block> BlockManager<T> {
 
         let score = get_diff(&hash) * PPLNS_SHARE_UNITS / get_diff(&target);
 
-        if share.score_changes.verify_scores(score) {
+        if window.verify_changes(&share.score_changes, score) {
             warn!("Score changes are unbalanced...");
             return Err(ShareVerificationError::BadRewards);
         }

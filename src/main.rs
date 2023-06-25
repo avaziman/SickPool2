@@ -6,13 +6,12 @@ use log4rs;
 use sickpool2lib::config::ProtocolServerConfig;
 use sickpool2lib::p2p::networking::config::ConfigP2P;
 use sickpool2lib::p2p::networking::server::ServerP2P;
-use sickpool2lib::protocol::{JsonRpcProtocol, Protocol};
-use sickpool2lib::server::Server;
+
 use sickpool2lib::stratum::server::StratumServer;
-use sickpool2lib::stratum::stratum_v1::StratumV1;
+
 use std::path::{Path, PathBuf};
 use std::result::Result;
-use std::sync::Arc;
+
 use std::{env, fs};
 
 extern crate sickpool2lib;

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crypto_bigint::U256;
-
+use log::info;
 
 use super::{
     block::Block,
@@ -19,7 +19,15 @@ where
             return;
         }
 
-        self.block_manager.process_share(block.clone(), &target).unwrap();
+        if let Ok(valid_p2p_share) = self.block_manager.process_share(
+            block.clone(),
+            &target,
+            &self.pplns_window.lock().unwrap(),
+        ) {
+            info!("FOUND new share submission hash: {}", &valid_p2p_share.hash);
+
+            self.pplns_window.lock().unwrap().add(valid_p2p_share);
+        }
     }
 
     fn on_new_block(&self, height: u32, block: &BlockT) {

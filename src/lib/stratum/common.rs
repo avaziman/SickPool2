@@ -3,7 +3,7 @@ use crypto_bigint::U256;
 
 use crate::p2p::networking::{block::Block};
 
-use super::{job::Job, header::BlockHeader, client::StratumClient};
+use super::{job::{JobBtc, Job}, header::BlockHeader, client::StratumClient};
 
 pub enum ShareResult {
     Valid(U256),
@@ -14,17 +14,17 @@ pub enum ShareResult {
 }
 
 #[inline]
-pub fn process_share<T: Block>(
-    job: &mut Option<&mut Job<T>>,
+pub fn process_share<T: Block, E>(
+    job: &mut Option<&mut JobBtc<T, E>>,
     params: <T::HeaderT as BlockHeader>::SubmitParams,
     client: &mut StratumClient,
 ) -> ShareResult {
     match job {
         Some(job) => {
-            job.block.get_header_mut().update_fields(&params);
-            let _share = job.block.clone();
+            let block = &mut job.block;
+            block.get_header_mut().update_fields(&params);
 
-            let hash = job.block.get_header().get_hash();
+            let hash = block.get_header().get_hash();
             let low = hash.as_words()[0];
             
             if client.submitted_shares.contains(&low) {
@@ -35,9 +35,9 @@ pub fn process_share<T: Block>(
 
             info!("Hash {:x}", hash);
 
-            if hash >= job.target {
+            if hash <= job.target {
                 ShareResult::Block(hash)
-            } else if hash >= client.difficulty {
+            } else if hash <= client.difficulty {
                 ShareResult::Valid(hash)
             } else {
                 ShareResult::Invalid()

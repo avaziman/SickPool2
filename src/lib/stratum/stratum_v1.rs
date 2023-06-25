@@ -1,6 +1,6 @@
 use bitcoincore_rpc::bitcoin::{self, Address};
 
-use log::{info, warn};
+use log::{error, info, warn};
 
 use slab::Slab;
 use std::{
@@ -8,8 +8,8 @@ use std::{
     net::SocketAddr,
     str::FromStr,
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, MutexGuard, RwLock,
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
     },
     time::Instant,
 };
@@ -22,7 +22,7 @@ use crate::{
     },
     protocol::{JsonRpcProtocol, Protocol},
     server::Notifier,
-    sickrpc::{RpcReqBody, RpcRequest},
+    sickrpc::RpcReqBody,
 };
 
 use super::{
@@ -30,16 +30,16 @@ use super::{
     common::{process_share, ShareResult},
     config::StratumConfig,
     handler::StratumHandler,
-    job::Job,
+    job::JobBtc,
     job_fetcher::BlockFetcher,
     job_manager::JobManager,
     protocol::{StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams},
 };
 
 // original slush bitcoin stratum protocol
-pub struct StratumV1<T: BlockFetcher> {
-    job_manager: RwLock<JobManager<T>>,
-    client_count: AtomicUsize,
+pub struct StratumV1<T: BlockFetcher<BlockT = bitcoin::Block>> {
+    job_manager: RwLock<JobManager<JobBtc<bitcoin::Block, RpcReqBody>>>,
+    client_count: AtomicU32,
     config: StratumConfig,
     pub handler: CompleteStrartumHandler<T::BlockT>,
     pub subscribed_clients: Mutex<Slab<Notifier>>,
@@ -54,7 +54,7 @@ where
         &self,
         req: StratumRequestsBtc,
         ctx: Arc<Mutex<StratumClient>>,
-        ptx: &mut StratumProcessingContext<T>,
+        ptx: &mut StratumProcessingContext<T::BlockT, RpcReqBody>,
     ) -> Result<(Value, Vec<RpcReqBody>), StratumV1ErrorCodes> {
         let now = Instant::now();
         info!("Received stratum request: {:?}", req);
@@ -77,7 +77,7 @@ where
                             ["mining.notify", Value::Null]
                         ],
                         hex::encode(lock.extra_nonce.to_be_bytes()),
-                        8,
+                        std::mem::size_of_val(&lock.extra_nonce),
                     ]),
                     Vec::new(),
                 ))
@@ -105,8 +105,11 @@ where
                 let job = jobs.iter().next().unwrap().1;
 
                 let notifs = Vec::from([
-                    ("mining.set_difficulty".into(), json!(11)),
-                    job.get_broadcast_message(),
+                    (
+                        "mining.set_difficulty".into(),
+                        json!([self.config.default_diff]),
+                    ),
+                    job.broadcast_message.clone(),
                 ]);
 
                 Ok((Value::Bool(true), notifs))
@@ -122,7 +125,7 @@ where
         &self,
         params: SubmitReqParams,
         ctx: Arc<Mutex<StratumClient>>,
-        ptx: &mut StratumProcessingContext<T>,
+        ptx: &mut StratumProcessingContext<T::BlockT, RpcReqBody>,
     ) -> Result<(Value, Vec<RpcReqBody>), StratumV1ErrorCodes> {
         if !ptx
             .jobs
@@ -133,7 +136,6 @@ where
 
         let mut job = ptx.jobs.get_mut(&params.job_id);
         let mut lock = ctx.lock().unwrap();
-        let _difficulty = lock.difficulty;
         let address = match lock.authorized_workers.get(&params.worker_name) {
             Some(s) => s.clone(),
             None => return Err(StratumV1ErrorCodes::UnauthorizedWorker),
@@ -142,7 +144,16 @@ where
         let res = process_share(&mut job, params, &mut *lock);
 
         match res {
-            ShareResult::Valid(diff) | ShareResult::Block(diff) => {
+            ShareResult::Block(diff) => {
+                info!("Found block!");
+                let job = job.unwrap();
+                if let Err(e) = self.daemon_cli.submit_block(&job.block) {
+                    error!("Failed to submit blocK: {}", e);
+                }
+
+                self.handler.on_valid_share(address, &job.block, diff)
+            }
+            ShareResult::Valid(diff) => {
                 self.handler
                     .on_valid_share(address, &job.unwrap().block, diff)
             }
@@ -175,7 +186,10 @@ where
 
     pub fn fetch_new_job(&self, header_fetcher: &T) {
         let mut lock = self.job_manager.write().unwrap();
-        let res = lock.get_new_job(header_fetcher);
+        let res = lock.get_new_job(
+            header_fetcher,
+            &self.handler.p2p.pplns_window.lock().unwrap().address_scores,
+        );
 
         if let Ok(job) = res {
             if let Some(job) = job {
@@ -187,7 +201,7 @@ where
                 );
 
                 for (_token, notifier) in &*lock {
-                    JsonRpcProtocol::<Self>::notify(job.get_broadcast_message(), notifier);
+                    JsonRpcProtocol::<Self>::notify(job.broadcast_message.clone(), notifier);
                 }
                 self.handler.on_new_block(job.height, &job.block);
             }
@@ -206,13 +220,13 @@ impl Into<Result<Value, StratumV1ErrorCodes>> for ShareResult {
     }
 }
 
-pub struct StratumProcessingContext<RpcClient: BlockFetcher> {
-    pub jobs: HashMap<u32, Job<RpcClient::BlockT>>,
+pub struct StratumProcessingContext<T, E> {
+    pub jobs: HashMap<u32, JobBtc<T, E>>,
 }
 
-impl<T> Default for StratumProcessingContext<T>
-where
-    T: BlockFetcher<BlockT = bitcoin::Block>,
+impl<T, E> Default for StratumProcessingContext<T, E>
+// where
+// T: BlockFetcher<BlockT = bitcoin::Block>,
 {
     fn default() -> Self {
         StratumProcessingContext {
@@ -231,7 +245,7 @@ where
     type Response = Result<(Value, Vec<RpcReqBody>), StratumV1ErrorCodes>;
     type Config = (StratumConfig, Arc<ProtocolP2P<T::BlockT>>);
     type ClientContext = StratumClient;
-    type ProcessingContext = StratumProcessingContext<T>;
+    type ProcessingContext = StratumProcessingContext<T::BlockT, RpcReqBody>;
 
     fn new(conf: Self::Config) -> Self {
         // let p = .clone();
@@ -240,7 +254,7 @@ where
 
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),
-            client_count: AtomicUsize::new(0),
+            client_count: AtomicU32::new(0),
             subscribed_clients: Mutex::new(Slab::new()),
             daemon_cli,
             handler: CompleteStrartumHandler { p2p: conf.1 },

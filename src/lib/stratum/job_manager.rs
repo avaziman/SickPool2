@@ -2,27 +2,34 @@ use std::collections::HashMap;
 
 use log::info;
 
-use crate::p2p::networking::{block::Block};
+use crate::{p2p::networking::{block::Block, protocol::Address}, stratum::job::Job};
 
-use super::{header::BlockHeader, job::Job, job_fetcher::BlockFetcher};
+use super::{header::BlockHeader, job::JobBtc, job_fetcher::BlockFetcher};
 
-pub struct JobManager<Fetcher: BlockFetcher> {
+pub struct JobManager<JobT> {
     job_count: u32,
-    jobs: HashMap<u32, Job<Fetcher::BlockT>>,
+    jobs: HashMap<u32, JobT>,
 }
 
 // job manager is responsible for generating and updating jobs, the only one that can mutate jobs
-impl<Fetcher: BlockFetcher> JobManager<Fetcher> {
-    pub fn new(header_fetcher: &Fetcher) -> JobManager<Fetcher> {
+impl<BlockT: Block, E> JobManager<JobBtc<BlockT, E>>
+where
+    JobBtc<BlockT, E>: Job<BlockT, E>,
+{
+    pub fn new<Fetcher: BlockFetcher<BlockT = BlockT>>(
+        header_fetcher: &Fetcher,
+    ) -> JobManager<JobBtc<BlockT, E>> {
         let mut jobs = HashMap::with_capacity(16);
 
-        match header_fetcher.fetch_block() {
+        // this is an invalid job, no outputs TODO: ...
+        match header_fetcher.fetch_block(&HashMap::new()) {
             Ok(res) => {
-                let job = Job::new(0, res.block, res.height, res.reward);
+                let id = 0;
+                let job = JobBtc::new(id, res);
 
                 info!("First job: {:#?}", job);
 
-                jobs.insert(job.id, job);
+                jobs.insert(id, job);
             }
             Err(e) => panic!("Failed to generate 1st job: {}", e),
         }
@@ -30,11 +37,12 @@ impl<Fetcher: BlockFetcher> JobManager<Fetcher> {
         JobManager { job_count: 1, jobs }
     }
 
-    pub fn get_new_job(
+    pub fn get_new_job<Fetcher: BlockFetcher<BlockT = BlockT>>(
         &mut self,
         header_fetcher: &Fetcher,
-    ) -> Result<Option<&Job<Fetcher::BlockT>>, Fetcher::ErrorT> {
-        let fetched = header_fetcher.fetch_block()?;
+        vout: &HashMap<Address, u64>
+    ) -> Result<Option<&JobBtc<BlockT, E>>, Fetcher::ErrorT> {
+        let fetched = header_fetcher.fetch_block(vout)?;
 
         if fetched
             .block
@@ -44,17 +52,12 @@ impl<Fetcher: BlockFetcher> JobManager<Fetcher> {
             return Ok(None);
         }
 
-        let job = Job::new(
-            self.job_count,
-            fetched.block,
-            fetched.height,
-            fetched.reward,
-        );
+        let id = self.job_count;
+        let job = JobBtc::new(id, fetched);
 
         self.job_count += 1;
 
-        let id = job.id;
-        self.jobs.insert(job.id, job);
+        self.jobs.insert(id, job);
 
         Ok(Some(self.jobs.get(&id).unwrap()))
     }
@@ -63,7 +66,7 @@ impl<Fetcher: BlockFetcher> JobManager<Fetcher> {
         self.job_count
     }
 
-    pub fn get_jobs(&self) -> HashMap<u32, Job<Fetcher::BlockT>> {
+    pub fn get_jobs(&self) -> HashMap<u32, JobBtc<BlockT, E>> {
         self.jobs.clone()
     }
 }

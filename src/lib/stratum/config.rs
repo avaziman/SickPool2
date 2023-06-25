@@ -8,6 +8,7 @@ pub struct StratumConfig {
     pub rpc_url: String,
     #[serde(deserialize_with = "deserialize_duration")]
     pub job_poll_interval: Duration,
+    pub default_diff: f64,
 }
 
 impl Default for StratumConfig {
@@ -15,6 +16,7 @@ impl Default for StratumConfig {
         Self {
             rpc_url: String::from(""),
             job_poll_interval: Duration::from_secs(5),
+            default_diff: 1000.0,
         }
     }
 }

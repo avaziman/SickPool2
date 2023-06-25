@@ -277,7 +277,6 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
             // TODO: buffer failed writes
             if event.is_writable() {
                 if let Some(con) = self.connections.get_mut(token.0) {
-                    eprint!("WRITABLE");
                     if !con.connected {
                         match con.stream.as_ref().peer_addr() {
                             Ok(_k) => {

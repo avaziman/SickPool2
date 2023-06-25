@@ -17,3 +17,6 @@ pub const PPLNS_DIFF_MULTIPLIER: u64 = 5;
 pub const DEV_ADDRESS_BTC_STR: &str = "bc1q3k7q92qf3hmpdpekz4t9r2e3tszy2g4gv9gwea";
 
 pub const MAX_RETARGET_FACTOR : u64 = 4;
+
+// graffiti term borrowed from iron fish, very nice.
+pub const GENERATION_GRAFFITI : [u8; 32] = *b"Mined the right way on P3Pool ||";

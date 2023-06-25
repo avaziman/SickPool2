@@ -5,8 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-
-use crypto_bigint::{U256};
+use crypto_bigint::U256;
 
 use io_arc::IoArc;
 use log::{info, warn};
@@ -15,20 +14,22 @@ use mio::{net::TcpStream, Token};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-use crate::{protocol::Protocol, server::{respond, Notifier}};
+use crate::{
+    protocol::Protocol,
+    server::{respond, Notifier},
+};
 
 use super::{
     block::Block,
     block_manager::BlockManager,
-    hard_config::{
-        CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION,
-    },
+    config::ConfigP2P,
+    hard_config::{CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION},
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
     pplns::{MyBtcAddr, ScoreChanges, WindowPPLNS},
     target_manager::TargetManager,
-    utils::time_now_ms, config::ConfigP2P,
+    utils::time_now_ms,
 };
 use bincode::{self};
 
@@ -153,10 +154,7 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
     }
 
     // TODO clean
-    fn delete_client(
-        &self,
-        ctx: Arc<Mutex<Self::ClientContext>>,
-    ) {
+    fn delete_client(&self, ctx: Arc<Mutex<Self::ClientContext>>) {
         // TODO: CHECK
         // self.peers.lock().unwrap().remove(&token);
 
@@ -230,7 +228,10 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
     ) -> Option<Messages<BlockT>> {
         let target = *self.target_manager.lock().unwrap().target();
 
-        match self.block_manager.process_share(share, &target) {
+        match self
+            .block_manager
+            .process_share(share, &target, &self.pplns_window.lock().unwrap())
+        {
             Ok(pshare) => {
                 // check if valid mainnet block
                 // let main_target = pshare.inner.block.get_header().get_target();

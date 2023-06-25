@@ -4,10 +4,9 @@ use io_arc::IoArc;
 use log::warn;
 use mio::net::TcpStream;
 use serde_json::Value;
-use slab::Slab;
 use std::{
     net::SocketAddr,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
 };
 
 use crate::{

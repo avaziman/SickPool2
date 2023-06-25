@@ -9,6 +9,7 @@ pub struct RpcRequest {
     pub params: Value,
     pub id: Option<u64>,
     pub method: String,
+    #[serde(skip_serializing_if="Option::is_none")]
     pub jsonrpc: Option<String>,
 }
 

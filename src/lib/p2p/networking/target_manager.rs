@@ -25,10 +25,15 @@ pub struct TargetManager {
 impl TargetManager {
     pub fn new<T: Block>(target_time: Duration, diff_adjust: u32) -> Self {
         let genesis = T::genesis();
+        // let target = genesis.get_header().get_target();
+        let target = U256::MAX;
+
+        info!("Initial p2p target: {}", target);
+
         Self {
             last_adjustment: Adjustment {
                 time: 1687522225,
-                target: genesis.get_header().get_target(),
+                target,
                 height: 0,
             },
             target_time,
