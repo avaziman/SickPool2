@@ -3,7 +3,7 @@ use std::{time::Duration};
 use crypto_bigint::{CheckedMul, U256};
 use log::{info, warn};
 
-use crate::{p2p::networking::hard_config::MAX_RETARGET_FACTOR, stratum::header::BlockHeader};
+use crate::{p2p::networking::{hard_config::MAX_RETARGET_FACTOR, difficulty::{MAX_TARGET, get_diff1_score}}, stratum::header::BlockHeader};
 
 use super::{block::Block};
 
@@ -24,11 +24,13 @@ pub struct TargetManager {
 // TODO: save pool start time and block maybe
 impl TargetManager {
     pub fn new<T: Block>(target_time: Duration, diff_adjust: u32) -> Self {
-        let genesis = T::genesis();
+        let _genesis = T::genesis();
         // let target = genesis.get_header().get_target();
-        let target = U256::MAX;
+        let target = MAX_TARGET;
 
-        info!("Initial p2p target: {}", target);
+        info!("Initial p2p target: {}, difficulty: {}", target, get_diff1_score(&target));
+
+        info!("MAX TARGET: {}", MAX_TARGET);
 
         Self {
             last_adjustment: Adjustment {

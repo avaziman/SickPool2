@@ -1,8 +1,8 @@
 use crypto_bigint::U256;
 use sickpool2lib::{
-    p2p::networking::difficulty::get_diff,
+    p2p::networking::difficulty::get_diff1_score,
     protocol::JsonRpcProtocol,
-    stratum::{protocol::StratumV1ErrorCodes, stratum_v1::StratumV1},
+    stratum::{stratum_v1::StratumV1},
 };
 
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -36,7 +36,7 @@ fn criterion_benchmark2(c: &mut Criterion) {
 
     c.bench_function("getdiff", move |b| {
         b.iter(|| {
-            get_diff(&check);
+            get_diff1_score(&check);
             check = check.wrapping_add(&U256::ONE);
         })
     });

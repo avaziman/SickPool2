@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::thread;
 
 use bitcoincore_rpc::bitcoin;
-use log::info;
+
 
 use crate::config::ProtocolServerConfig;
 use crate::p2p::networking::protocol::ProtocolP2P;
@@ -36,7 +36,7 @@ where
                 thread::sleep(job_poll_interval);
                 // info!("Polling job...");
 
-                protocol.up.fetch_new_job(&protocol.up.daemon_cli);
+                // protocol.up.fetch_new_job(&protocol.up.daemon_cli);
             }
         });
 

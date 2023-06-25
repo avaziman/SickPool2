@@ -22,7 +22,7 @@ where
         let mut jobs = HashMap::with_capacity(16);
 
         // this is an invalid job, no outputs TODO: ...
-        match header_fetcher.fetch_block(&HashMap::new()) {
+        match header_fetcher.fetch_block(&HashMap::new(), [0u8; 32]) {
             Ok(res) => {
                 let id = 0;
                 let job = JobBtc::new(id, res);
@@ -40,9 +40,10 @@ where
     pub fn get_new_job<Fetcher: BlockFetcher<BlockT = BlockT>>(
         &mut self,
         header_fetcher: &Fetcher,
-        vout: &HashMap<Address, u64>
+        vout: &HashMap<Address, u64>,
+        prev_p2p_share: [u8; 32],
     ) -> Result<Option<&JobBtc<BlockT, E>>, Fetcher::ErrorT> {
-        let fetched = header_fetcher.fetch_block(vout)?;
+        let fetched = header_fetcher.fetch_block(vout, prev_p2p_share)?;
 
         if fetched
             .block
@@ -64,6 +65,10 @@ where
 
     pub fn get_job_count(&self) -> u32 {
         self.job_count
+    }
+
+    pub fn last_job(&self) -> &JobBtc<BlockT, E>{
+        &self.jobs[&(self.job_count - 1)]
     }
 
     pub fn get_jobs(&self) -> HashMap<u32, JobBtc<BlockT, E>> {

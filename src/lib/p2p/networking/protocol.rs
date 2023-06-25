@@ -2,9 +2,14 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     path::Path,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
+use bitcoin::{
+    address::{NetworkUnchecked},
+    Network,
+};
 use crypto_bigint::U256;
 
 use io_arc::IoArc;
@@ -23,7 +28,7 @@ use super::{
     block::Block,
     block_manager::BlockManager,
     config::ConfigP2P,
-    hard_config::{CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION},
+    hard_config::{CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
@@ -38,7 +43,7 @@ pub struct ProtocolP2P<BlockT> {
     pub conf: ConfigP2P,
     hello_message: Messages<BlockT>,
     pub peers: Mutex<HashMap<Token, Notifier>>,
-    data_dir: Box<Path>,
+    // data_dir: Box<Path>,
     pub peer_manager: PeerManager,
     pub block_manager: BlockManager<BlockT>,
     pub target_manager: Mutex<TargetManager>,
@@ -65,7 +70,15 @@ impl<BlockT: Block> ShareP2P<BlockT> {
                 prev_hash: U256::ZERO,
             },
             score_changes: ScoreChanges {
-                added: Vec::new(),
+                added: Vec::from([(
+                    MyBtcAddr(
+                        bitcoin::Address::<NetworkUnchecked>::from_str(DEV_ADDRESS_BTC_STR)
+                            .unwrap()
+                            .require_network(Network::Bitcoin)
+                            .unwrap(),
+                    ),
+                    PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
+                )]),
                 removed: Vec::new(),
             },
             block,
@@ -74,7 +87,7 @@ impl<BlockT: Block> ShareP2P<BlockT> {
 }
 
 // p2pool difficulty (bits) is encoded inside block generation tx
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct CoinabseEncodedP2P {
     pub prev_hash: U256,
 }
@@ -105,7 +118,6 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
             hello_message: Messages::Hello(Hello::new(conf.2)),
             peer_manager: PeerManager::new(data_dir.clone()),
             block_manager: BlockManager::new(data_dir.clone()),
-            data_dir,
         }
     }
 

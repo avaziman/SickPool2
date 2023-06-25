@@ -1,0 +1,30 @@
+{
+  "header": {
+    "version": 536870912,
+    "prev_blockhash": "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206",
+    "merkle_root": "b43a900b25868f0c4700321bf7fa4728198c95ca8a81a6c81d08f53bb2458fa4",
+    "time": 1296688603,
+    "bits": 545259519,
+    "nonce": 3137754880
+  },
+  "txdata": [
+    {
+      "version": 2,
+      "lock_time": 0,
+      "input": [
+        {
+          "previous_output": "0000000000000000000000000000000000000000000000000000000000000000:4294967295",
+          "script_sig": "51204d696e65642074686520726967687420776179206f6e205033506f6f6c207c7c206fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d6190000000000",
+          "sequence": 4294967295,
+          "witness": []
+        }
+      ],
+      "output": [
+        {
+          "value": 5000000000,
+          "script_pubkey": "00148dbc02a8098df6168736155651ab315c044522a8"
+        }
+      ]
+    }
+  ]
+}

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ProtocolServerConfig;
 
-use super::{config::ConfigP2P, hard_config::CURRENT_VERSION};
+use super::{config::ConfigP2P, hard_config::CURRENT_VERSION, block::EncodeErrorP2P};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Messages<BlockT> {
@@ -36,7 +36,7 @@ impl Hello {
 
 #[derive(Debug, PartialEq)]
 pub enum ShareVerificationError {
-    BadEncoding,
+    BadEncoding(EncodeErrorP2P),
     BadTarget,
     BadRewards,
     BadLinkMain,

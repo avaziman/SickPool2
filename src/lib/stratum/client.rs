@@ -12,7 +12,7 @@ pub struct StratumClient {
     pub extra_nonce: u32,
     pub authorized_workers: HashMap<String, Address>,
     pub submitted_shares: HashSet<u64>,
-    pub difficulty: U256,
+    pub target: U256,
     pub subscription_key: Option<usize>
 }
 
@@ -21,7 +21,7 @@ impl StratumClient {
         StratumClient {
             notifier,
             extra_nonce: id,
-            difficulty: U256::ZERO,
+            target: U256::ZERO,
             authorized_workers: HashMap::new(),
             submitted_shares: HashSet::new(),
             subscription_key: None

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crypto_bigint::U256;
-use log::info;
+use log::{info, error};
 
 use super::{
     block::Block,
@@ -19,14 +19,19 @@ where
             return;
         }
 
-        if let Ok(valid_p2p_share) = self.block_manager.process_share(
+        match self.block_manager.process_share(
             block.clone(),
             &target,
             &self.pplns_window.lock().unwrap(),
         ) {
-            info!("FOUND new share submission hash: {}", &valid_p2p_share.hash);
+            Ok(valid_p2p_share) => {
+                info!("LOCAL FOUND new share submission hash: {}", &valid_p2p_share.hash);
 
-            self.pplns_window.lock().unwrap().add(valid_p2p_share);
+                self.pplns_window.lock().unwrap().add(valid_p2p_share);
+            },
+            Err(e) => {
+                error!("LOCAL P2P share rejected for: {:?}", e);
+            }
         }
     }
 

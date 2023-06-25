@@ -7,30 +7,24 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Cargo test",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib"
+                ]
+            },
+            "args": []
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug executable 'SickPool2'",
             "cargo": {
                 "args": [
                     "build",
                     "--bin=sickpool2",
-                ],
-                "filter": {
-                    "name": "sickpool2",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'sickpool2'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=sickpool2",
-                    "--package=sickpool2"
                 ],
                 "filter": {
                     "name": "sickpool2",

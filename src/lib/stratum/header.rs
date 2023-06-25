@@ -1,4 +1,5 @@
 
+use bitcoin::consensus::Encodable;
 use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::bitcoin::{Target};
 
@@ -10,24 +11,17 @@ use super::protocol::SubmitReqParams;
 
 
 pub trait BlockHeader : Clone + std::fmt::Debug + Serialize + DeserializeOwned {
-    type SubmitParams;
-
     fn get_hash(&self) -> U256;
     fn get_target(&self) -> U256;
     fn get_time(&self) -> u32;
     fn get_prev(&self) -> U256;
     fn get_version(&self) -> u32;
-    fn update_fields(&mut self, params: &Self::SubmitParams);
     fn equal(&self, other: &Self) -> bool;
 }
 
 impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
     // type BlockHashT = BlockHash;
-    type SubmitParams = SubmitReqParams;
 
-    fn update_fields(&mut self, params: &SubmitReqParams) {
-        self.nonce = params.nonce;
-    }
 
     fn get_hash(&self) -> U256 {
         U256::from_le_bytes(self.block_hash().to_byte_array())
@@ -43,7 +37,7 @@ impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
     }
 
     fn equal(&self, other: &Self) -> bool {
-        self.prev_blockhash == other.prev_blockhash
+        self.prev_blockhash == other.prev_blockhash && self.merkle_root == other.merkle_root
     }
 
     fn get_time(&self) -> u32 {

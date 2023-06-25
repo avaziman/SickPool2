@@ -2,15 +2,11 @@
 pub mod tests {
 
     use bitcoincore_rpc::Client;
-    use mio::Token;
-    use serde_json::{json, Value};
 
     use crate::protocol::JsonRpcProtocol;
-    use crate::stratum::protocol::{self, StratumV1ErrorCodes};
     use crate::stratum::stratum_v1::StratumV1;
     use crate::{
-        sickrpc::{self, RpcRequest},
-        stratum::protocol::{AuthorizeReqParams, StratumRequestsBtc, SubmitReqParams},
+        stratum::protocol::{StratumRequestsBtc, SubmitReqParams},
     };
 
     #[test]
@@ -35,7 +31,7 @@ pub mod tests {
             StratumRequestsBtc::Submit(SubmitReqParams {
                 worker_name: String::from("slush.miner1"),
                 job_id: 0xbf,
-                nonce2: 0x00000001,
+                extranonce2: 0x00000001,
                 time: 0x504e86ed,
                 nonce: 0xb2957c02
             })

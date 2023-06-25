@@ -42,16 +42,15 @@ impl<'de> Deserialize<'de> for MyBtcAddr {
 
 impl ScoreChanges {
     pub fn new(
-        current_scores: HashMap<Address, u64>,
+        mut current_scores: HashMap<Address, u64>,
         mut last_scores: HashMap<Address, u64>,
     ) -> ScoreChanges {
         let mut removed = Vec::new();
         let mut added = Vec::new();
 
         for (key, score) in last_scores.drain() {
-            match current_scores.get(&key) {
+            match current_scores.remove(&key) {
                 Some(last_score) => {
-                    let last_score = *last_score;
 
                     if score > last_score {
                         added.push((key, score - last_score));
@@ -65,6 +64,12 @@ impl ScoreChanges {
                 }
             }
         }
+
+        // remaining in current scores are completely new
+        for (addr, score) in current_scores {
+            added.push((addr, score));
+        }
+
         ScoreChanges { added, removed }
     }
 }
@@ -84,6 +89,15 @@ pub struct WindowEntry<T> {
 }
 // pub static PPLNS_DIFF_MULTIPLIER_DECIMAL: Decimal =PPLNS_DIFF_MULTIPLIER.into();
 
+pub fn get_reward(score: Score, total_reward: u64) -> u64 {
+    score * total_reward / (PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS)
+}
+
+pub fn get_score(rewarded: u64, total_reward: u64) -> u64 {
+    (rewarded * PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS) / total_reward
+}
+
+
 impl<BlockT> WindowPPLNS<BlockT>
 where
     BlockT: Block,
@@ -94,12 +108,21 @@ where
             score: PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
         };
 
-        Self {
-            pplns_window: VecDeque::from([genesis_entry]),
+        let mut me = Self {
+            pplns_window: VecDeque::new(),
             pplns_sum: 0,
             oldest_height: 0,
             address_scores: HashMap::new(),
-        }
+        };
+
+        me.internal_add(genesis_entry);
+        me
+    }
+
+    fn internal_add(&mut self, entry: WindowEntry<BlockT>) {
+        self.pplns_sum += entry.score;
+        self.add_scores(&entry.share.score_changes.added);
+        self.pplns_window.push_front(entry);
     }
 
     pub fn add(&mut self, pshare: ProcessedShare<BlockT>) {
@@ -108,10 +131,8 @@ where
             share: pshare.inner,
         };
 
-        self.pplns_sum += entry.score;
-        self.add_scores(&entry.share.score_changes.added);
         self.remove_scores(&entry.share.score_changes.removed);
-        self.pplns_window.push_front(entry);
+        self.internal_add(entry);
 
         // clean expired pplns...
         // pplns window must always be full.
@@ -147,7 +168,7 @@ where
                         remove_left -= amt;
                     }
                     None => {
-                        let x = expected_removed.insert(&added_to, *amt);
+                        let _x = expected_removed.insert(&added_to, *amt);
                     }
                 }
                 if remove_left <= 0 {
@@ -206,7 +227,12 @@ where
 
     fn add_scores(&mut self, scores: &Vec<(Address, Score)>) {
         for (added_to, amt) in scores {
-            *self.address_scores.get_mut(&added_to).unwrap() += amt;
+            match self.address_scores.get_mut(&added_to) {
+                Some(k) => *k += amt,
+                None => {
+                    self.address_scores.insert(added_to.clone(), *amt);
+                }
+            };
         }
     }
 

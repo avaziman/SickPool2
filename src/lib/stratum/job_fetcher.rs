@@ -1,5 +1,6 @@
-use std::{path::PathBuf, collections::HashMap};
+use std::{path::PathBuf, collections::HashMap, str::FromStr};
 
+use bitcoin::BlockHash;
 use bitcoincore_rpc::{
     self,
     bitcoin::{self},
@@ -21,6 +22,7 @@ pub trait BlockFetcher {
     fn fetch_block(
         &self,
         vout: &HashMap<Address, u64>,
+        prev_p2p_share: [u8; 32],
     ) -> Result<BlockFetch<Self::BlockT>, Self::ErrorT>;
     fn submit_block(&self, block: &Self::BlockT) -> Result<(), bitcoincore_rpc::Error>;
     fn new(url: &str) -> Self;
@@ -41,6 +43,7 @@ impl BlockFetcher for bitcoincore_rpc::Client {
     fn fetch_block(
         &self,
         vout: &HashMap<Address, u64>,
+        prev_p2p_share: [u8; 32],
     ) -> Result<BlockFetch<bitcoin::Block>, bitcoincore_rpc::Error> {
         use bitcoincore_rpc::json::*;
 
@@ -51,7 +54,7 @@ impl BlockFetcher for bitcoincore_rpc::Client {
         )?;
         let height = header.height as u32;
 
-        let (block, tx_hashes) = Self::BlockT::from_block_template(&header, vout);
+        let (block, tx_hashes) = Self::BlockT::from_block_template(&header, vout, prev_p2p_share);
 
         Ok(BlockFetch {
             block,

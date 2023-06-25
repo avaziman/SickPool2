@@ -101,13 +101,13 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
 
                     let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
 
-                    let elapsed = now.elapsed().as_micros();
                     respond(writer.as_ref(), stratum_resp.as_ref());
-                    info!(
-                        "Processed response: {:?}, in {}us",
-                        display_bytes_string(&stratum_resp),
-                        elapsed
-                    );
+                    // let elapsed = now.elapsed().as_micros();
+                    // info!(
+                    //     "Processed response: {:?}, in {}us",
+                    //     display_bytes_string(&stratum_resp),
+                    //     elapsed
+                    // );
                 }
             });
         }

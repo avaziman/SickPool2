@@ -25,7 +25,7 @@ pub struct SubmitReqParams {
     #[serde(with = "SerHex::<Strict>")]
     pub job_id: u32,
     #[serde(with = "SerHex::<Strict>")]
-    pub nonce2: u32,
+    pub extranonce2: u32,
     #[serde(with = "SerHex::<Strict>")]
     pub time: u32,
     #[serde(with = "SerHex::<Strict>")]

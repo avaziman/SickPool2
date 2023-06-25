@@ -1,5 +1,6 @@
 use bitcoincore_rpc::bitcoin::{self, Address};
 
+use crypto_bigint::Encoding;
 use log::{error, info, warn};
 
 use slab::Slab;
@@ -8,7 +9,7 @@ use std::{
     net::SocketAddr,
     str::FromStr,
     sync::{
-        atomic::{AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc, Mutex, RwLock,
     },
     time::Instant,
@@ -18,6 +19,7 @@ use serde_json::{json, Value};
 
 use crate::{
     p2p::networking::{
+        block::Block, difficulty::get_target_from_diff_units, hard_config::PPLNS_SHARE_UNITS,
         pplns::MyBtcAddr, protocol::ProtocolP2P, stratum_handler::CompleteStrartumHandler,
     },
     protocol::{JsonRpcProtocol, Protocol},
@@ -30,6 +32,7 @@ use super::{
     common::{process_share, ShareResult},
     config::StratumConfig,
     handler::StratumHandler,
+    header::BlockHeader,
     job::JobBtc,
     job_fetcher::BlockFetcher,
     job_manager::JobManager,
@@ -78,6 +81,7 @@ where
                         ],
                         hex::encode(lock.extra_nonce.to_be_bytes()),
                         std::mem::size_of_val(&lock.extra_nonce),
+                        // extranonce 2
                     ]),
                     Vec::new(),
                 ))
@@ -101,16 +105,18 @@ where
                     .authorized_workers
                     .insert(params.username, MyBtcAddr(pk));
 
-                let jobs = self.job_manager.read().unwrap().get_jobs();
-                let job = jobs.iter().next().unwrap().1;
+                let jobs = self.job_manager.read().unwrap();
+                let job = jobs.last_job();
 
+                let diff = self.config.default_diff_units;
                 let notifs = Vec::from([
                     (
                         "mining.set_difficulty".into(),
-                        json!([self.config.default_diff]),
+                        json!([diff as f64 / PPLNS_SHARE_UNITS as f64]),
                     ),
                     job.broadcast_message.clone(),
                 ]);
+                ctx.lock().unwrap().target = get_target_from_diff_units(diff);
 
                 Ok((Value::Bool(true), notifs))
             }
@@ -129,7 +135,7 @@ where
     ) -> Result<(Value, Vec<RpcReqBody>), StratumV1ErrorCodes> {
         if !ptx
             .jobs
-            .contains_key(&self.job_manager.read().unwrap().get_job_count())
+            .contains_key(&(self.job_manager.read().unwrap().get_job_count() - 1))
         {
             ptx.jobs = self.job_manager.read().unwrap().get_jobs()
         }
@@ -141,14 +147,18 @@ where
             None => return Err(StratumV1ErrorCodes::UnauthorizedWorker),
         };
 
-        let res = process_share(&mut job, params, &mut *lock);
+        let res = process_share(
+            &mut job,
+            (params, lock.extra_nonce),
+            &mut *lock,
+        );
 
         match res {
             ShareResult::Block(diff) => {
                 info!("Found block!");
                 let job = job.unwrap();
                 if let Err(e) = self.daemon_cli.submit_block(&job.block) {
-                    error!("Failed to submit blocK: {}", e);
+                    error!("Failed to submit block: {}", e);
                 }
 
                 self.handler.on_valid_share(address, &job.block, diff)
@@ -189,6 +199,14 @@ where
         let res = lock.get_new_job(
             header_fetcher,
             &self.handler.p2p.pplns_window.lock().unwrap().address_scores,
+            self.handler
+                .p2p
+                .block_manager
+                .p2p_tip()
+                .block
+                .get_header()
+                .get_hash()
+                .to_le_bytes(),
         );
 
         if let Ok(job) = res {
@@ -254,7 +272,7 @@ where
 
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),
-            client_count: AtomicU32::new(0),
+            client_count: AtomicU32::new(1),
             subscribed_clients: Mutex::new(Slab::new()),
             daemon_cli,
             handler: CompleteStrartumHandler { p2p: conf.1 },
