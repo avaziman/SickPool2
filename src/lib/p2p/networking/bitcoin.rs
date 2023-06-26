@@ -89,7 +89,6 @@ impl Block for block::Block {
         let tx_hashes = txs.iter().map(|t| t.txid()).collect_vec();
 
         let merkle_root = calculate_root_inline(&mut tx_hashes.clone()).unwrap();
-        // merkle_root.reverse();
 
         let merkle_root = TxMerkleNode::from_raw_hash(merkle_root.to_raw_hash());
         let bits_bytes = template.bits.clone().try_into().unwrap();

@@ -3,9 +3,10 @@ use bitcoin::{
 };
 use crypto_bigint::{Encoding, U256};
 use display_bytes::display_bytes_string;
+use itertools::Itertools;
 use log::info;
 use serde_json::json;
-use sha2::{Digest, Sha256, digest::typenum::U2};
+use sha2::{digest::typenum::U2, Digest, Sha256};
 
 use crate::{
     p2p::networking::{
@@ -55,7 +56,7 @@ where
         }
     }
 
-    pub fn format_prev_hash(hash: &U256) -> String{
+    pub fn format_prev_hash(hash: &U256) -> String {
         let words = hash.to_words();
         let mut prev_hash_str = String::with_capacity(64);
 
@@ -94,7 +95,10 @@ impl Job<bitcoin::Block, RpcReqBody> for JobBtc<bitcoin::Block, RpcReqBody> {
                 prev_hash_str,
                 hex::encode(&cb_bytes[..COINB1_SIZE]),
                 hex::encode(&cb_bytes[(COINB1_SIZE + 8)..]),
-                merkle_steps,
+                merkle_steps
+                    .iter()
+                    .map(|h| { hex::encode(h) })
+                    .collect_vec(),
                 hex::encode(header.version.to_consensus().to_be_bytes()),
                 hex::encode(header.bits.to_consensus().to_be_bytes()),
                 hex::encode(header.time.to_be_bytes()),
@@ -110,24 +114,18 @@ impl Job<bitcoin::Block, RpcReqBody> for JobBtc<bitcoin::Block, RpcReqBody> {
 
         let extra_nonce = ((*extra_nonce1).to_be() as u64) + ((params.extranonce2 as u64) << 32);
         // let extra_nonce = 1u64;
-        
-        println!("{:x}",extra_nonce);
+
         // insert second nonce
-        self.block.txdata[0].input[0].script_sig.as_mut_bytes()[MIN_SCRIPT_SIZE - 1..MIN_SCRIPT_SIZE + 7]
+        self.block.txdata[0].input[0].script_sig.as_mut_bytes()
+            [MIN_SCRIPT_SIZE - 1..MIN_SCRIPT_SIZE + 7]
             .copy_from_slice(&extra_nonce.to_le_bytes());
 
-        let mut cb_bytes = Vec::new();
-        self.block.txdata[0].consensus_encode(&mut cb_bytes);
-
-        println!("cb {}", hex::encode(&cb_bytes));
-
-
         // recalculate cb hash and merkle root
-        let mut cb_txid = self.block.txdata[0].txid();
-        // cb_txid.reverse();
-        let mut merkle_root = build_merkle_root_from_steps(cb_txid.to_byte_array(), &self.merkle_steps);
-        // merkle_root.reverse();
-        info!("CBBT: {}", cb_txid);
+        let cb_txid = self.block.txdata[0].txid().to_byte_array();
+
+        let merkle_root = build_merkle_root_from_steps(cb_txid, &self.merkle_steps);
+
+        // be
         self.block.header.merkle_root = TxMerkleNode::from_byte_array(merkle_root);
     }
 }
@@ -182,7 +180,7 @@ mod tests {
 
     use crypto_bigint::U256;
 
-    use crate::sickrpc::RpcReqBody;
+    use crate::{sickrpc::RpcReqBody, stratum::job::build_merkle_root_from_steps};
 
     use super::{calc_merkle_steps, JobBtc};
 
@@ -207,15 +205,53 @@ mod tests {
                 hex_to_arr("5fa3a8bfaf3cc7e9d15e1c63ff07f8837b882e3b09e915b507a6a9a31246a22c")
             ])
         );
+
+        let root = build_merkle_root_from_steps(
+            hex_to_arr("e5f3ca253995a8bb45b1efaec5b436e14825a1aa2ab1382379c9729575aed1c1"),
+            &steps,
+        );
+        assert_eq!(
+            root,
+            hex_to_arr("f01b9e318508b61c335bd856efb27ad7826fc8363878e95e45a9c6f361fbfd03")
+        );
     }
 
     #[test]
-    fn test_format_prev_hash(){
-        let res = JobBtc::<bitcoin::Block, RpcReqBody>::format_prev_hash(&U256::from_be_hex("00000000000000000001ebcedce3d84dab04cc80fad12e90270e77a2037907b0"));
+    fn test_steps2() {
+        let hashes = Vec::from([
+            hex_to_arr("B735924B863A7C07C78A116563B70C37D43341919CA291E5E030A71E0858A6BA"),
+            hex_to_arr("B37631D59688DD9712DA1057654EF9685D1B22DB75A2BE187FF6FAD691EE9D7A"),
+        ]);
 
-        assert_eq!(res, String::from("037907b0270e77a2fad12e90ab04cc80dce3d84d0001ebce0000000000000000"));
+        let steps = calc_merkle_steps(hashes);
+        assert_eq!(
+            steps,
+            Vec::from([hex_to_arr(
+                "b37631d59688dd9712da1057654ef9685d1b22db75a2be187ff6fad691ee9d7a"
+            ),])
+        );
+
+        let root = build_merkle_root_from_steps(
+            hex_to_arr("b735924b863a7c07c78a116563b70c37d43341919ca291e5e030a71e0858a6ba"),
+            &steps,
+        );
+        assert_eq!(
+            root,
+            hex_to_arr("b734860607317db2da7c040d6b94c92a4f0fdbad973a87134b9c4d64249834e8")
+        );
     }
 
+    #[test]
+    fn test_format_prev_hash() {
+        let res = JobBtc::<bitcoin::Block, RpcReqBody>::format_prev_hash(&U256::from_be_hex(
+            "00000000000000000001ebcedce3d84dab04cc80fad12e90270e77a2037907b0",
+        ));
+
+        assert_eq!(
+            res,
+            String::from("037907b0270e77a2fad12e90ab04cc80dce3d84d0001ebce0000000000000000")
+        );
+    }
 }
 
 // #[derive(Serialize_tuple)]

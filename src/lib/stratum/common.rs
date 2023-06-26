@@ -31,7 +31,6 @@ where
             job.update_fields(&params);
 
             let hash = job.block.get_header().get_hash();
-            println!("Header {:?}", &job.block.get_header());
 
             let low = hash.as_words()[0];
 
