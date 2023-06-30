@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use bitcoin::ScriptBuf;
 use log::info;
 
-use crate::{p2p::networking::{block::Block, protocol::Address}, stratum::job::Job};
+use crate::{p2p::networking::{block::Block}, stratum::job::Job, coins::coin::Coin};
 
 use super::{header::BlockHeader, job::JobBtc, job_fetcher::BlockFetcher};
 
@@ -12,17 +13,17 @@ pub struct JobManager<JobT> {
 }
 
 // job manager is responsible for generating and updating jobs, the only one that can mutate jobs
-impl<BlockT: Block, E> JobManager<JobBtc<BlockT, E>>
+impl<E> JobManager<JobBtc<bitcoin::Block, E>>
 where
-    JobBtc<BlockT, E>: Job<BlockT, E>,
+    JobBtc<bitcoin::Block, E>: Job<bitcoin::Block, E>,
 {
-    pub fn new<Fetcher: BlockFetcher<BlockT = BlockT>>(
+    pub fn new<Fetcher: BlockFetcher<bitcoin::Block>>(
         header_fetcher: &Fetcher,
-    ) -> JobManager<JobBtc<BlockT, E>> {
+    ) -> JobManager<JobBtc<bitcoin::Block, E>> {
         let mut jobs = HashMap::with_capacity(16);
 
         // this is an invalid job, no outputs TODO: ...
-        match header_fetcher.fetch_block(&HashMap::new(), [0u8; 32]) {
+        match header_fetcher.fetch_blocktemplate(Vec::new().into_iter(), [0u8; 32]) {
             Ok(res) => {
                 let id = 0;
                 let job = JobBtc::new(id, res);
@@ -37,13 +38,13 @@ where
         JobManager { job_count: 1, jobs }
     }
 
-    pub fn get_new_job<Fetcher: BlockFetcher<BlockT = BlockT>>(
+    pub fn get_new_job<Fetcher: BlockFetcher<bitcoin::Block>>(
         &mut self,
         header_fetcher: &Fetcher,
-        vout: &HashMap<Address, u64>,
+        vout: impl Iterator<Item = (ScriptBuf, u64)>,
         prev_p2p_share: [u8; 32],
-    ) -> Result<Option<&JobBtc<BlockT, E>>, Fetcher::ErrorT> {
-        let fetched = header_fetcher.fetch_block(vout, prev_p2p_share)?;
+    ) -> Result<Option<&JobBtc<bitcoin::Block, E>>, Fetcher::ErrorT> {
+        let fetched = header_fetcher.fetch_blocktemplate(vout, prev_p2p_share)?;
 
         if fetched
             .block
@@ -67,11 +68,11 @@ where
         self.job_count
     }
 
-    pub fn last_job(&self) -> &JobBtc<BlockT, E>{
+    pub fn last_job(&self) -> &JobBtc<bitcoin::Block, E>{
         &self.jobs[&(self.job_count - 1)]
     }
 
-    pub fn get_jobs(&self) -> HashMap<u32, JobBtc<BlockT, E>> {
+    pub fn get_jobs(&self) -> HashMap<u32, JobBtc<bitcoin::Block, E>> {
         self.jobs.clone()
     }
 }

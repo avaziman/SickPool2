@@ -1,7 +1,7 @@
 use crypto_bigint::U256;
 use log::info;
 
-use crate::p2p::networking::block::Block;
+use crate::{p2p::networking::block::Block, coins::coin::Coin};
 
 use super::{
     client::StratumClient,
@@ -18,13 +18,13 @@ pub enum ShareResult {
 }
 
 #[inline]
-pub fn process_share<T: Block, E>(
-    job: &mut Option<&mut JobBtc<T, E>>,
-    params: <JobBtc<T, E> as Job<T, E>>::SubmitParams,
+pub fn process_share<B: Block, E>(
+    job: &mut Option<&mut JobBtc<B, E>>,
+    params: <JobBtc<B, E> as Job<B, E>>::SubmitParams,
     client: &mut StratumClient,
 ) -> ShareResult
 where
-    JobBtc<T, E>: Job<T, E>,
+    JobBtc<B, E>: Job<B, E>,
 {
     match job {
         Some(job) => {

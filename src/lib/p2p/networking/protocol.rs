@@ -6,10 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use bitcoin::{
-    address::{NetworkUnchecked},
-    Network,
-};
+use bitcoin::{address::NetworkUnchecked, Network};
 use crypto_bigint::U256;
 
 use io_arc::IoArc;
@@ -22,48 +19,61 @@ use std::net::SocketAddr;
 use crate::{
     protocol::Protocol,
     server::{respond, Notifier},
+    stratum::job_fetcher::BlockFetcher,
 };
 
 use super::{
     block::Block,
     block_manager::BlockManager,
     config::ConfigP2P,
-    hard_config::{CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
+    hard_config::{
+        CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER,
+        PPLNS_SHARE_UNITS,
+    },
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
-    pplns::{MyBtcAddr, ScoreChanges, WindowPPLNS},
+    pplns::{ScoreChanges, WindowPPLNS},
     target_manager::TargetManager,
     utils::time_now_ms,
 };
+use crate::coins::coin::Coin;
 use bincode::{self};
 
-pub struct ProtocolP2P<BlockT> {
-    pub pplns_window: Mutex<WindowPPLNS<BlockT>>,
+pub struct ProtocolP2P<C: Coin> {
+    pub pplns_window: Mutex<WindowPPLNS<C>>,
     pub conf: ConfigP2P,
-    hello_message: Messages<BlockT>,
+    hello_message: Messages<C::BlockT>,
     pub peers: Mutex<HashMap<Token, Notifier>>,
     // data_dir: Box<Path>,
     pub peer_manager: PeerManager,
-    pub block_manager: BlockManager<BlockT>,
+    pub block_manager: BlockManager<C>,
     pub target_manager: Mutex<TargetManager>,
+    pub daemon_cli: C::Fetcher,
 }
 
-pub type Address = MyBtcAddr;
 pub type Reward = u64;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ShareP2P<BlockT> {
-    pub block: BlockT,
+pub struct ShareP2P<C: Coin > {
+    pub block: C::BlockT,
     pub encoded: CoinabseEncodedP2P,
     // #[serde(skip)]
     // hash: U256,
-    pub score_changes: ScoreChanges,
+    pub score_changes: ScoreChanges<C::Address>,
 }
+use crate::address::Address;
 
-impl<BlockT: Block> ShareP2P<BlockT> {
-    pub fn genesis() -> Self {
-        let block = BlockT::genesis();
+impl<C: Coin> ShareP2P<C> {
+    pub fn fetch_genesis(fetcher: &impl BlockFetcher<C::BlockT>) -> Self {
+        let block = fetcher
+            .fetch_block(
+                &C::main_config_p2p()
+                    .protocol_config
+                    .consensus
+                    .genesis_block_hash,
+            )
+            .expect("Failed to fetch genesis pool block");
 
         Self {
             encoded: CoinabseEncodedP2P {
@@ -71,12 +81,7 @@ impl<BlockT: Block> ShareP2P<BlockT> {
             },
             score_changes: ScoreChanges {
                 added: Vec::from([(
-                    MyBtcAddr(
-                        bitcoin::Address::<NetworkUnchecked>::from_str(DEV_ADDRESS_BTC_STR)
-                            .unwrap()
-                            .require_network(Network::Bitcoin)
-                            .unwrap(),
-                    ),
+                    C::Address::from_string(C::DONATION_ADDRESS).expect("INVALID DEV ADDRESS"),
                     PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
                 )]),
                 removed: Vec::new(),
@@ -92,13 +97,7 @@ pub struct CoinabseEncodedP2P {
     pub prev_hash: U256,
 }
 
-impl CoinabseEncodedP2P {
-    // fn get_target(&self) -> U256 {
-    //     U256::from_le_bytes(Target::from_compact(self.diff_bits).to_le_bytes())
-    // }
-}
-
-impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
+impl<C: Coin> Protocol for ProtocolP2P<C> {
     type Request = Vec<u8>;
     type Response = Vec<u8>;
     type Config = (ConfigP2P, Box<Path>, u16); // data dir, listening port
@@ -107,9 +106,18 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
 
     fn new(conf: Self::Config) -> Self {
         let data_dir = conf.1;
+
+        let daemon_cli = C::Fetcher::new(conf.0.rpc_url.as_ref());
+        let pool_genesis = daemon_cli
+            .fetch_block(&conf.0.consensus.genesis_block_hash)
+            .expect("Failed to get genesis block.");
+
         Self {
-            pplns_window: Mutex::new(WindowPPLNS::new()),
-            target_manager: Mutex::new(TargetManager::new::<BlockT>(
+            pplns_window: Mutex::new(WindowPPLNS::new(&daemon_cli)),
+            block_manager: BlockManager::new(&daemon_cli, data_dir.clone()),
+            daemon_cli,
+            target_manager: Mutex::new(TargetManager::new::<C>(
+                pool_genesis,
                 conf.0.consensus.block_time,
                 conf.0.consensus.diff_adjust_blocks,
             )),
@@ -117,7 +125,6 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
             conf: conf.0,
             hello_message: Messages::Hello(Hello::new(conf.2)),
             peer_manager: PeerManager::new(data_dir.clone()),
-            block_manager: BlockManager::new(data_dir.clone()),
         }
     }
 
@@ -179,17 +186,17 @@ impl<BlockT: Block> Protocol for ProtocolP2P<BlockT> {
     fn create_ptx(&self) -> Self::ProcessingContext {}
 }
 
-impl<BlockT: Block> ProtocolP2P<BlockT> {
+impl<C: Coin> ProtocolP2P<C> {
     #[doc(hidden)]
-    pub fn parse_request(req: &[u8]) -> Result<Messages<BlockT>, bincode::Error> {
+    pub fn parse_request(req: &[u8]) -> Result<Messages<C::BlockT>, bincode::Error> {
         bincode::deserialize(&req)
     }
 
     fn process_message(
         &self,
         ctx: Arc<Mutex<Peer>>,
-        message: Messages<BlockT>,
-    ) -> Option<Messages<BlockT>> {
+        message: Messages<C::BlockT>,
+    ) -> Option<Messages<C::BlockT>> {
         info!("Received p2p message: {:?}", &message);
         match message {
             Messages::Hello(hello) => self.handle_hello(hello, ctx),
@@ -202,7 +209,7 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
         }
     }
 
-    fn handle_hello(&self, hello: Hello, ctx: Arc<Mutex<Peer>>) -> Option<Messages<BlockT>> {
+    fn handle_hello(&self, hello: Hello, ctx: Arc<Mutex<Peer>>) -> Option<Messages<C::BlockT>> {
         if hello.version >= OLDEST_COMPATIBLE_VERSION {
             let mut lock = ctx.lock().unwrap();
             lock.authorized = Some(hello.version);
@@ -215,7 +222,7 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
         }
     }
 
-    fn handle_ver_ack(&self, ctx: Arc<Mutex<Peer>>) -> Option<Messages<BlockT>> {
+    fn handle_ver_ack(&self, ctx: Arc<Mutex<Peer>>) -> Option<Messages<C::BlockT>> {
         // listening port is already known as it was used to connect...
         let mut lock = ctx.lock().unwrap();
         lock.authorized = Some(CURRENT_VERSION);
@@ -223,7 +230,7 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
         None
     }
 
-    fn handle_get_shares(&self) -> Option<Messages<BlockT>> {
+    fn handle_get_shares(&self) -> Option<Messages<C::BlockT>> {
         // listening port is already known as it was used to connect...
         let shares = self.block_manager.load_shares();
 
@@ -236,14 +243,15 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
     fn handle_share_submit(
         &self,
         ctx: Arc<Mutex<Peer>>,
-        share: BlockT,
-    ) -> Option<Messages<BlockT>> {
-        let target = *self.target_manager.lock().unwrap().target();
+        share: C::BlockT,
+    ) -> Option<Messages<C::BlockT>> {
+        let targetman = self.target_manager.lock().unwrap();
 
-        match self
-            .block_manager
-            .process_share(share, &target, &self.pplns_window.lock().unwrap())
-        {
+        match self.block_manager.process_share(
+            share,
+            &targetman,
+            &self.pplns_window.lock().unwrap(),
+        ) {
             Ok(pshare) => {
                 // check if valid mainnet block
                 // let main_target = pshare.inner.block.get_header().get_target();
@@ -268,11 +276,11 @@ impl<BlockT: Block> ProtocolP2P<BlockT> {
         None
     }
 
-    pub fn send_message(message: &Messages<BlockT>, stream: &TcpStream) {
+    pub fn send_message(message: &Messages<C::BlockT>, stream: &TcpStream) {
         respond(stream, Self::serialize_message(message).as_ref())
     }
 
-    pub fn serialize_message(message: &Messages<BlockT>) -> Vec<u8> {
+    pub fn serialize_message(message: &Messages<C::BlockT>) -> Vec<u8> {
         let mut bytes = bincode::serialize(message).unwrap();
         bytes.push('\n' as u8);
         bytes

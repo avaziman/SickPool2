@@ -23,27 +23,3 @@ pub struct ProtocolServerConfig<ProtocolConfig> {
     #[serde(flatten)]
     pub protocol_config: ProtocolConfig,
 }
-
-impl Default for ProtocolServerConfig<StratumConfig> {
-    fn default() -> Self {
-        Self {
-            server_config: ServerConfig {
-                address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_STRATUM_PORT),
-                processing_threads: 2,
-            },
-            protocol_config: StratumConfig::default(),
-        }
-    }
-}
-
-impl Default for ProtocolServerConfig<ConfigP2P> {
-    fn default() -> Self {
-        Self {
-            server_config: ServerConfig {
-                address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_P2P_PORT),
-                processing_threads: 2,
-            },
-            protocol_config: Default::default(),
-        }
-    }
-}

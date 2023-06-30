@@ -1,5 +1,6 @@
 #![deny(unsafe_code)]
 mod currency;
+pub mod address;
 
 use log::info;
 use log4rs;

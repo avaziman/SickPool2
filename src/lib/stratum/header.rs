@@ -1,5 +1,5 @@
 
-use bitcoin::consensus::Encodable;
+
 use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::bitcoin::{Target};
 
@@ -7,7 +7,7 @@ use crypto_bigint::{U256, Encoding};
 use serde::{Serialize};
 use serde::de::DeserializeOwned;
 
-use super::protocol::SubmitReqParams;
+
 
 
 pub trait BlockHeader : Clone + std::fmt::Debug + Serialize + DeserializeOwned {
@@ -21,7 +21,6 @@ pub trait BlockHeader : Clone + std::fmt::Debug + Serialize + DeserializeOwned {
 
 impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
     // type BlockHashT = BlockHash;
-
 
     fn get_hash(&self) -> U256 {
         U256::from_le_bytes(self.block_hash().to_byte_array())

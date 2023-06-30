@@ -1,19 +1,18 @@
 use bitcoin::{
-    consensus::Encodable, hash_types::TxMerkleNode, hashes::Hash, merkle_tree::calculate_root,
+    consensus::Encodable, hash_types::TxMerkleNode, hashes::Hash,
 };
-use crypto_bigint::{Encoding, U256};
-use display_bytes::display_bytes_string;
+use crypto_bigint::{ U256};
+
 use itertools::Itertools;
-use log::info;
+
 use serde_json::json;
-use sha2::{digest::typenum::U2, Digest, Sha256};
+use sha2::{Digest, Sha256};
 
 use crate::{
     p2p::networking::{
-        bitcoin::{COINB1_SIZE, MIN_SCRIPT_SIZE},
-        block::Block,
+        block::Block, bitcoin::SCRIPTLESS_COINB1_SIZE,
     },
-    sickrpc::RpcReqBody,
+    sickrpc::RpcReqBody, coins::{coin::Coin, bitcoin::Btc},
 };
 
 use super::{header::BlockHeader, job_fetcher::BlockFetch, protocol::SubmitReqParams};
@@ -37,12 +36,13 @@ pub struct JobBtc<BlockT, MessageT> {
     pub broadcast_message: MessageT,
 }
 
-impl<T: Block, E> JobBtc<T, E>
+impl</* Address, */ E> JobBtc<bitcoin::Block, E>
 where
-    JobBtc<T, E>: Job<T, E>,
+    // bitcoin::Block: Block<Address>,
+    JobBtc<bitcoin::Block, E>: Job<bitcoin::Block, E>,
 {
-    pub fn new(id: u32, fetch: BlockFetch<T>) -> Self {
-        let target = fetch.block.get_header().get_target();
+    pub fn new(id: u32, fetch: BlockFetch<bitcoin::Block>) -> Self {
+        let target = fetch.block.header.get_target();
         // TODO: avoid clone, its unnececsergfsdf
         let merkle_steps = calc_merkle_steps(fetch.tx_hashes.clone());
         JobBtc {
@@ -78,23 +78,22 @@ impl Job<bitcoin::Block, RpcReqBody> for JobBtc<bitcoin::Block, RpcReqBody> {
         fetch: &BlockFetch<bitcoin::Block>,
         merkle_steps: &Vec<[u8; 32]>,
     ) -> RpcReqBody {
-        let header = fetch.block.get_header();
+        let header = fetch.block.header;
 
         let mut cb_bytes = Vec::new();
         let _res: &Result<usize, std::io::Error> =
             &fetch.block.txdata[0].consensus_encode(&mut cb_bytes);
 
-        println!("vb{}", hex::encode(&cb_bytes));
-
+        let script_size = fetch.block.txdata[0].input[0].script_sig.len();
         let prev_hash_str = Self::format_prev_hash(&header.get_prev());
-
+        let coinb1_size = SCRIPTLESS_COINB1_SIZE + script_size;
         (
             String::from("mining.notify"),
             json!([
                 hex::encode(id.to_be_bytes()),
                 prev_hash_str,
-                hex::encode(&cb_bytes[..COINB1_SIZE]),
-                hex::encode(&cb_bytes[(COINB1_SIZE + 8)..]),
+                hex::encode(&cb_bytes[..coinb1_size - 7]),
+                hex::encode(&cb_bytes[(coinb1_size + 1)..]),
                 merkle_steps
                     .iter()
                     .map(|h| { hex::encode(h) })
@@ -116,8 +115,9 @@ impl Job<bitcoin::Block, RpcReqBody> for JobBtc<bitcoin::Block, RpcReqBody> {
         // let extra_nonce = 1u64;
 
         // insert second nonce
+        let len = self.block.txdata[0].input[0].script_sig.len();
         self.block.txdata[0].input[0].script_sig.as_mut_bytes()
-            [MIN_SCRIPT_SIZE - 1..MIN_SCRIPT_SIZE + 7]
+            [len-8..len]
             .copy_from_slice(&extra_nonce.to_le_bytes());
 
         // recalculate cb hash and merkle root

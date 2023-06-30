@@ -4,13 +4,13 @@ use std::collections::{HashSet, HashMap};
 
 use crypto_bigint::U256;
 
-use crate::{p2p::networking::protocol::Address, server::Notifier};
+use crate::{ server::Notifier};
 
 #[derive(Debug)]
 pub struct StratumClient {
     pub notifier: Notifier,
     pub extra_nonce: u32,
-    pub authorized_workers: HashMap<String, Address>,
+    pub authorized_workers: HashMap<String, String>,
     pub submitted_shares: HashSet<u64>,
     pub target: U256,
     pub subscription_key: Option<usize>

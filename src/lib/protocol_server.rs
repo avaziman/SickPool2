@@ -4,10 +4,9 @@ pub mod tests {
     use bitcoincore_rpc::Client;
 
     use crate::protocol::JsonRpcProtocol;
+    use crate::stratum::protocol::AuthorizeReqParams;
+    use crate::stratum::protocol::{StratumRequestsBtc, SubmitReqParams};
     use crate::stratum::stratum_v1::StratumV1;
-    use crate::{
-        stratum::protocol::{StratumRequestsBtc, SubmitReqParams},
-    };
 
     #[test]
     pub fn submit_parse() {
@@ -38,27 +37,32 @@ pub mod tests {
         );
     }
 
-    // #[test]
-    // fn authorize_parse() {
-    //     let req =
-    //         r#"{"params": ["slush.miner1", "password"], "id": 2, "method": "mining.authorize"}"#;
+    #[test]
+    pub fn authorize_parse() {
+        let req =
+            r#"{"params": ["slush.miner1", "password"], "id": 2, "method": "mining.authorize"}"#;
+        let req = String::from(req);
 
-    //     let req = String::from(req);
+        // let rpc_result: (String, Token) = rpc_server::parse_req(&req).unwrap();
+        let result = JsonRpcProtocol::<StratumV1<Client>>::parse_request(&req.as_bytes()).unwrap();
 
-    //     // let rpc_result: (String, Token) = rpc_server::parse_req(&req).unwrap();
-    //     let result: StratumRequestV1 =
-    //         StratumV1::<bitcoincore_rpc::Client>::parse_req(&req).unwrap();
-    //     assert_eq!(
-    //         result,
-    //         StratumRequestV1 {
-    //             id: Some(2),
-    //             stratum_request: StratumRequestsBtc::Authorize(AuthorizeReqParams {
-    //                 username: String::from("slush.miner1"),
-    //                 password: String::from("password"),
-    //             })
-    //         }
-    //     );
-    // }
+        assert_eq!(result.id, Some(2));
+        assert_eq!(result.method, String::from("mining.authorize"));
+        assert_eq!(result.jsonrpc, None);
+
+        let stratum_req =
+            StratumV1::<bitcoincore_rpc::Client>::parse_stratum_req(result.method, result.params)
+                .unwrap();
+
+        assert_eq!(
+            stratum_req,
+            StratumRequestsBtc::Authorize(AuthorizeReqParams {
+                username: String::from("slush.miner1"),
+                password: String::from("password")
+            })
+        );
+    }
+
 }
 
 // TODO: return the rpc correct inheritens and write custom deserializer

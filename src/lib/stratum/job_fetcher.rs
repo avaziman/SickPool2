@@ -1,13 +1,13 @@
-use std::{path::PathBuf, collections::HashMap, str::FromStr};
+use std::{collections::HashMap, path::PathBuf};
 
-use bitcoin::BlockHash;
+use bitcoin::{hashes::Hash, BlockHash, ScriptBuf};
 use bitcoincore_rpc::{
     self,
     bitcoin::{self},
-    Auth, RpcApi,
+    Auth, RpcApi, bitcoincore_rpc_json::GetBlockTemplateResult,
 };
 
-use crate::p2p::networking::{block::Block, protocol::Address};
+use crate::{coins::coin::Coin, p2p::networking::block::Block};
 
 pub struct BlockFetch<BlockT> {
     pub block: BlockT,
@@ -16,20 +16,23 @@ pub struct BlockFetch<BlockT> {
     pub reward: u64,
 }
 
-pub trait BlockFetcher {
-    type BlockT: Block;
+pub trait BlockFetcher<BlockT: Block> : Send + Sync {
     type ErrorT: std::fmt::Display;
-    fn fetch_block(
-        &self,
-        vout: &HashMap<Address, u64>,
-        prev_p2p_share: [u8; 32],
-    ) -> Result<BlockFetch<Self::BlockT>, Self::ErrorT>;
-    fn submit_block(&self, block: &Self::BlockT) -> Result<(), bitcoincore_rpc::Error>;
     fn new(url: &str) -> Self;
+    fn fetch_blocktemplate(
+        &self,
+        vout: impl Iterator<Item = (ScriptBuf, u64)>,
+        prev_p2p_share: [u8; 32],
+    ) -> Result<BlockFetch<BlockT>, Self::ErrorT>;
+    fn submit_block(&self, block: &BlockT) -> Result<(), bitcoincore_rpc::Error>;
+
+    fn fetch_block(&self, hash: &[u8; 32]) -> Result<BlockT, bitcoincore_rpc::Error>;
 }
 
-impl BlockFetcher for bitcoincore_rpc::Client {
-    type BlockT = bitcoin::Block;
+impl BlockFetcher<bitcoin::Block> for bitcoincore_rpc::Client
+where
+    bitcoin::Block: Block<BlockTemplateT = GetBlockTemplateResult>,
+{
     type ErrorT = bitcoincore_rpc::Error;
 
     fn new(url: &str) -> Self {
@@ -40,9 +43,9 @@ impl BlockFetcher for bitcoincore_rpc::Client {
         .unwrap()
     }
 
-    fn fetch_block(
+    fn fetch_blocktemplate(
         &self,
-        vout: &HashMap<Address, u64>,
+        vout: impl Iterator<Item = (ScriptBuf, u64)>,
         prev_p2p_share: [u8; 32],
     ) -> Result<BlockFetch<bitcoin::Block>, bitcoincore_rpc::Error> {
         use bitcoincore_rpc::json::*;
@@ -54,7 +57,7 @@ impl BlockFetcher for bitcoincore_rpc::Client {
         )?;
         let height = header.height as u32;
 
-        let (block, tx_hashes) = Self::BlockT::from_block_template(&header, vout, prev_p2p_share);
+        let (block, tx_hashes) = bitcoin::Block::from_block_template(&header, vout, prev_p2p_share);
 
         Ok(BlockFetch {
             block,
@@ -64,71 +67,11 @@ impl BlockFetcher for bitcoincore_rpc::Client {
         })
     }
 
-    fn submit_block(&self, block: &Self::BlockT) -> Result<(), bitcoincore_rpc::Error>{
+    fn fetch_block(&self, hash: &[u8; 32]) -> Result<bitcoin::Block, bitcoincore_rpc::Error> {
+        self.get_block(&BlockHash::from_byte_array(hash.clone()))
+    }
+
+    fn submit_block(&self, block: &bitcoin::Block) -> Result<(), bitcoincore_rpc::Error> {
         RpcApi::submit_block(self, &block)
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use header::BlockHeader;
-//     use crate::stratum::header;
-
-//     use super::BlockFetcher;
-//     use bitcoincore_rpc::{self, bitcoin::block::Header};
-
-//     struct TestBtcFetcher {}
-//     impl BlockFetcher for TestBtcFetcher {
-//         type BlockT = Header;
-//         type ErrorT = bitcoincore_rpc::Error;
-
-//         fn new(url: &str) -> Self {
-//             TestBtcFetcher {}
-//         }
-
-//         fn fetch_block(&self) -> Result<Header, bitcoincore_rpc::Error> {
-//             use bitcoincore_rpc::json::*;
-
-//             let header : GetBlockTemplateResult= serde_json::from_str(
-//                 r#"{
-//             "capabilities": [
-//                 "proposal"
-//             ],
-//             "version": 536870912,
-//             "rules": [
-//                 "csv",
-//                 "!segwit",
-//                 "taproot"
-//             ],
-//             "vbavailable": {
-//             },
-//             "vbrequired": 0,
-//             "previousblockhash": "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206",
-//             "transactions": [
-//             ],
-//             "coinbaseaux": {
-//             },
-//             "coinbasevalue": 5000000000,
-//             "longpollid": "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e22060",
-//             "target": "7fffff0000000000000000000000000000000000000000000000000000000000",
-//             "mintime": 1296688603,
-//             "mutable": [
-//                 "time",
-//                 "transactions",
-//                 "prevblock"
-//             ],
-//             "noncerange": "00000000ffffffff",
-//             "sigoplimit": 80000,
-//             "sizelimit": 4000000,
-//             "weightlimit": 4000000,
-//             "curtime": 1686069956,
-//             "bits": "207fffff",
-//             "height": 1,
-//             "default_witness_commitment": "6a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf9"
-//             }"#
-//          ).unwrap();
-
-//             Ok(Header::from_block_template(&header))
-//         }
-//     }
-// }

@@ -9,3 +9,4 @@ pub mod stratum_v1;
 pub mod common;
 pub mod handler;
 pub mod server;
+pub mod stratum;

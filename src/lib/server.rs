@@ -1,4 +1,4 @@
-use display_bytes::display_bytes_string;
+
 use flume::Sender;
 use io_arc::IoArc;
 use log::{info, warn};
@@ -97,7 +97,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                         Arc<Mutex<P::ClientContext>>,
                     ) = rx.recv().unwrap();
 
-                    let now = Instant::now();
+                    let _now = Instant::now();
 
                     let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
 

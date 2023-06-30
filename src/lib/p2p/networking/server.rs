@@ -14,6 +14,7 @@ use super::config::ConfigP2P;
 use super::protocol::{ProtocolP2P};
 
 
+use crate::coins::coin::Coin;
 use crate::protocol::Protocol;
 
 use crate::{
@@ -23,13 +24,13 @@ use crate::{
 };
 
 // can operate without a stratum server
-pub struct ServerP2P<Fetcher: BlockFetcher> {
+pub struct ServerP2P<C: Coin> {
     // stratum: StratumServer<T>,
-    pub protocol: Arc<ProtocolP2P<Fetcher::BlockT>>,
-    server: Server<ProtocolP2P<Fetcher::BlockT>>,
+    pub protocol: Arc<ProtocolP2P<C>>,
+    server: Server<ProtocolP2P<C>>,
 }
 
-impl<T: BlockFetcher<BlockT = bitcoin::Block> + Send + Sync + 'static> ServerP2P<T> {
+impl<C: Coin + 'static> ServerP2P<C> {
     pub fn new(p2pconf: ProtocolServerConfig<ConfigP2P>, data_dir: Box<Path>) -> Self {
         let protocol = Arc::new(ProtocolP2P::new((
             p2pconf.protocol_config,

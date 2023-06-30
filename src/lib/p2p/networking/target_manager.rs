@@ -3,7 +3,7 @@ use std::{time::Duration};
 use crypto_bigint::{CheckedMul, U256};
 use log::{info, warn};
 
-use crate::{p2p::networking::{hard_config::MAX_RETARGET_FACTOR, difficulty::{MAX_TARGET, get_diff1_score}}, stratum::header::BlockHeader};
+use crate::{p2p::networking::{hard_config::MAX_RETARGET_FACTOR, difficulty::{MAX_TARGET}}, stratum::header::BlockHeader, coins::coin::Coin};
 
 use super::{block::Block};
 
@@ -23,14 +23,15 @@ pub struct TargetManager {
 // start each pool difficulty with the genesis block difficulty
 // TODO: save pool start time and block maybe
 impl TargetManager {
-    pub fn new<T: Block>(target_time: Duration, diff_adjust: u32) -> Self {
-        let _genesis = T::genesis();
-        // let target = genesis.get_header().get_target();
+    pub fn new<C: Coin>(genesis_block: C::BlockT, target_time: Duration, diff_adjust: u32) -> Self {
+        let target = genesis_block.get_header().get_target();
         let target = MAX_TARGET;
 
-        info!("Initial p2p target: {}, difficulty: {}", target, get_diff1_score(&target));
+        // info!("Initial p2p target: {}, difficulty: {}", target, get_diff1_score(&target));
 
         info!("MAX TARGET: {}", MAX_TARGET);
+
+        assert!(&target >= &MAX_TARGET);
 
         Self {
             last_adjustment: Adjustment {
@@ -47,7 +48,7 @@ impl TargetManager {
         &self.last_adjustment.target
     }
 
-    pub fn adjust(&mut self, current_height: u32, block: &impl Block) {
+    pub fn adjust<C: Coin>(&mut self, current_height: u32, block: &C::BlockT) {
         if current_height - self.last_adjustment.height < self.diff_adjust_blocks {
             return;
         }

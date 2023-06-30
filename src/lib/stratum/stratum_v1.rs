@@ -1,8 +1,13 @@
-use bitcoincore_rpc::bitcoin::{self, Address};
+use bitcoincore_rpc::{
+    bitcoin::{self},
+    Client,
+};
 
 use crypto_bigint::Encoding;
 use log::{error, info, warn};
 
+use crate::{coins::bitcoin::{Btc, MyBtcAddr}, address::Address};
+use crate::coins::coin::Coin;
 use slab::Slab;
 use std::{
     collections::HashMap,
@@ -20,7 +25,7 @@ use serde_json::{json, Value};
 use crate::{
     p2p::networking::{
         block::Block, difficulty::get_target_from_diff_units, hard_config::PPLNS_SHARE_UNITS,
-        pplns::MyBtcAddr, protocol::ProtocolP2P, stratum_handler::CompleteStrartumHandler,
+        protocol::ProtocolP2P, stratum_handler::CompleteStrartumHandler,
     },
     protocol::{JsonRpcProtocol, Protocol},
     server::Notifier,
@@ -36,28 +41,26 @@ use super::{
     job::JobBtc,
     job_fetcher::BlockFetcher,
     job_manager::JobManager,
-    protocol::{StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams},
+    protocol::{Discriminant, StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams},
+    stratum::StratumProtocol,
 };
 
 // original slush bitcoin stratum protocol
-pub struct StratumV1<T: BlockFetcher<BlockT = bitcoin::Block>> {
+pub struct StratumV1 {
     job_manager: RwLock<JobManager<JobBtc<bitcoin::Block, RpcReqBody>>>,
     client_count: AtomicU32,
     config: StratumConfig,
-    pub handler: CompleteStrartumHandler<T::BlockT>,
+    pub handler: CompleteStrartumHandler<Btc>,
     pub subscribed_clients: Mutex<Slab<Notifier>>,
-    pub daemon_cli: T,
+    pub daemon_cli: <Btc as Coin>::Fetcher,
 }
 
-impl<T> StratumV1<T>
-where
-    T: BlockFetcher<BlockT = bitcoin::Block>,
-{
+impl StratumV1 {
     pub fn process_stratum_request(
         &self,
         req: StratumRequestsBtc,
         ctx: Arc<Mutex<StratumClient>>,
-        ptx: &mut StratumProcessingContext<T::BlockT, RpcReqBody>,
+        ptx: &mut StratumProcessingContext<<Btc as Coin>::BlockT, RpcReqBody>,
     ) -> Result<(Value, Vec<RpcReqBody>), StratumV1ErrorCodes> {
         let now = Instant::now();
         info!("Received stratum request: {:?}", req);
@@ -88,11 +91,19 @@ where
             }
             StratumRequestsBtc::Authorize(params) => {
                 // TODO: get address
-                let pk = match Address::from_str(&params.username) {
+                let pk = match MyBtcAddr::from_string(&params.username) {
                     Ok(k) => {
                         // let atype = k.assume_checked().address_type();
                         // info!("Type: {:?}", atype);
-                        k.require_network(bitcoin::Network::Bitcoin).unwrap()
+                        k
+                        // match k.require_network(Btc::NETWORK) {
+                        //     Ok(k) => k,
+                        //     Err(_) => {
+                        //         return Err(StratumV1ErrorCodes::Unknown(String::from(
+                        //             "Invalid address provided, wrong netwrok.",
+                        //         )))
+                        //     }
+                        // }
                     }
                     Err(_) => {
                         return Err(StratumV1ErrorCodes::Unknown(String::from(
@@ -103,7 +114,7 @@ where
                 ctx.lock()
                     .unwrap()
                     .authorized_workers
-                    .insert(params.username, MyBtcAddr(pk));
+                    .insert(params.username.clone(), params.username);
 
                 let jobs = self.job_manager.read().unwrap();
                 let job = jobs.last_job();
@@ -131,7 +142,7 @@ where
         &self,
         params: SubmitReqParams,
         ctx: Arc<Mutex<StratumClient>>,
-        ptx: &mut StratumProcessingContext<T::BlockT, RpcReqBody>,
+        ptx: &mut StratumProcessingContext<<Btc as Coin>::BlockT, RpcReqBody>,
     ) -> Result<(Value, Vec<RpcReqBody>), StratumV1ErrorCodes> {
         if !ptx
             .jobs
@@ -147,11 +158,7 @@ where
             None => return Err(StratumV1ErrorCodes::UnauthorizedWorker),
         };
 
-        let res = process_share(
-            &mut job,
-            (params, lock.extra_nonce),
-            &mut *lock,
-        );
+        let res = process_share(&mut job, (params, lock.extra_nonce), &mut *lock);
 
         match res {
             ShareResult::Block(diff) => {
@@ -161,11 +168,12 @@ where
                     error!("Failed to submit block: {}", e);
                 }
 
-                self.handler.on_valid_share(address, &job.block, diff)
+                // self.handler
+                //     .on_valid_share(&MyBtcAddr::from_string(address).unwrap(), &job.block, diff)
             }
             ShareResult::Valid(diff) => {
-                self.handler
-                    .on_valid_share(address, &job.unwrap().block, diff)
+                // self.handler
+                //     .on_valid_share(&address.try_into().unwrap(), &job.unwrap().block, diff)
             }
             _ => {}
         };
@@ -193,12 +201,18 @@ where
             ))),
         }
     }
+}
 
-    pub fn fetch_new_job(&self, header_fetcher: &T) {
+impl StratumProtocol for StratumV1 {
+    type Coin = Btc;
+
+    fn fetch_new_job(&self) {
         let mut lock = self.job_manager.write().unwrap();
         let res = lock.get_new_job(
-            header_fetcher,
-            &self.handler.p2p.pplns_window.lock().unwrap().address_scores,
+            &self.daemon_cli,
+            self.handler.p2p.pplns_window.lock().unwrap().address_scores.iter().map(|(addr, score)| {
+                (addr.to_script(), *score)
+            }),
             self.handler
                 .p2p
                 .block_manager
@@ -224,6 +238,18 @@ where
                 self.handler.on_new_block(job.height, &job.block);
             }
         }
+    }
+}
+
+impl<T: StratumProtocol, E> StratumProtocol for JsonRpcProtocol<T>
+where
+    E: std::fmt::Display + Discriminant,
+    T: Protocol<Request = RpcReqBody, Response = Result<(Value, Vec<RpcReqBody>), E>>,
+{
+    type Coin = T::Coin;
+
+    fn fetch_new_job(&self) {
+        self.up.fetch_new_job()
     }
 }
 
@@ -254,21 +280,19 @@ impl<T, E> Default for StratumProcessingContext<T, E>
 }
 
 // any client that can generate the compatible header can be suited to this stratum protocol
-impl<T> Protocol for StratumV1<T>
-where
-    T: BlockFetcher<BlockT = bitcoin::Block>,
-{
+impl Protocol for StratumV1 {
     // method, params
     type Request = RpcReqBody;
     type Response = Result<(Value, Vec<RpcReqBody>), StratumV1ErrorCodes>;
-    type Config = (StratumConfig, Arc<ProtocolP2P<T::BlockT>>);
+    type Config = (StratumConfig, Arc<ProtocolP2P<Btc>>);
     type ClientContext = StratumClient;
-    type ProcessingContext = StratumProcessingContext<T::BlockT, RpcReqBody>;
+    type ProcessingContext = StratumProcessingContext<<Btc as Coin>::BlockT, RpcReqBody>;
 
     fn new(conf: Self::Config) -> Self {
         // let p = .clone();
 
-        let daemon_cli = T::new(conf.0.rpc_url.as_ref());
+        let daemon_cli =
+            <<Btc as Coin>::Fetcher as BlockFetcher<bitcoin::Block>>::new(conf.0.rpc_url.as_ref());
 
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),

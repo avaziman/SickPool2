@@ -15,11 +15,12 @@ use crate::{
     stratum::protocol::Discriminant,
 };
 
-pub trait Protocol {
+// multithreaded
+pub trait Protocol : Send + Sync {
     type Request: std::fmt::Debug;
     type Response;
     type Config;
-    type ClientContext: std::fmt::Debug + Sync + Send;
+    type ClientContext: std::fmt::Debug + Sync + Send + 'static;
     type ProcessingContext;
 
     fn new(conf: Self::Config) -> Self;

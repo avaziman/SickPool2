@@ -5,3 +5,5 @@ pub mod stratum;
 pub mod protocol;
 pub mod p2p;
 pub mod config;
+pub mod coins;
+pub mod address;

@@ -3,31 +3,28 @@ use std::thread;
 
 use bitcoincore_rpc::bitcoin;
 
-
 use crate::config::ProtocolServerConfig;
 use crate::p2p::networking::protocol::ProtocolP2P;
 use crate::protocol::Protocol;
 
 use crate::{protocol::JsonRpcProtocol, server::Server};
 
+use super::stratum::StratumProtocol;
 use super::{config::StratumConfig, job_fetcher::BlockFetcher, stratum_v1::StratumV1};
 
-type SProtocol<T> = JsonRpcProtocol<StratumV1<T>>;
+type SProtocol = JsonRpcProtocol<StratumV1>;
 
-pub struct StratumServer<T: BlockFetcher<BlockT = bitcoin::Block>> {
-    server: Server<SProtocol<T>>,
+pub struct StratumServer<T: StratumProtocol> {
+    server: Server<T>,
 }
 
 impl<T> StratumServer<T>
 where
-    T: BlockFetcher<BlockT = bitcoin::Block> + Send + Sync + 'static,
+    T: StratumProtocol + Send + Sync + 'static + Protocol<Request = Vec<u8>, Response = Vec<u8>>,
 {
-    pub fn new(
-        conf: ProtocolServerConfig<StratumConfig>,
-        p2p: Arc<ProtocolP2P<T::BlockT>>,
-    ) -> Self {
+    pub fn new(conf: ProtocolServerConfig<StratumConfig>, p2p: Arc<ProtocolP2P<T::Coin>>) -> Self {
         let job_poll_interval = conf.protocol_config.job_poll_interval;
-        let protocol = Arc::new(SProtocol::<T>::new((conf.protocol_config, p2p)));
+        let protocol = Arc::new(T::new((conf.protocol_config, p2p)));
 
         let protocol_poll_cp = protocol.clone();
         thread::spawn(move || {
@@ -36,7 +33,7 @@ where
                 thread::sleep(job_poll_interval);
                 // info!("Polling job...");
 
-                // protocol.up.fetch_new_job(&protocol.up.daemon_cli);
+                protocol.fetch_new_job();
             }
         });
 

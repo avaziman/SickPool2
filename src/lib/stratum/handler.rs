@@ -1,10 +1,15 @@
 use crypto_bigint::U256;
 
-use crate::p2p::networking::{protocol::Address, block::Block};
+use crate::{coins::coin::Coin, p2p::networking::block::Block};
 
+use super::job_fetcher::BlockFetcher;
 
-
-pub trait StratumHandler<BlockT: Block> {
-    fn on_valid_share(&self, address: Address, share: &BlockT, hash: U256);
-    fn on_new_block(&self, _height: u32, _header: &BlockT){}
+pub trait StratumHandler<C: Coin> {
+    fn on_valid_share(
+        &self,
+        address: &C::Address,
+        share: &C::BlockT,
+        hash: U256,
+    );
+    fn on_new_block(&self, height: u32, header: &C::BlockT);
 }
