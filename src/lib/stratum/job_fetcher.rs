@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{path::PathBuf};
 
 use bitcoin::{hashes::Hash, BlockHash, ScriptBuf};
 use bitcoincore_rpc::{
@@ -6,8 +6,9 @@ use bitcoincore_rpc::{
     bitcoin::{self},
     Auth, RpcApi, bitcoincore_rpc_json::GetBlockTemplateResult,
 };
+use crypto_bigint::{U256, Encoding};
 
-use crate::{coins::coin::Coin, p2p::networking::block::Block};
+use crate::{p2p::networking::block::Block};
 
 pub struct BlockFetch<BlockT> {
     pub block: BlockT,
@@ -22,11 +23,11 @@ pub trait BlockFetcher<BlockT: Block> : Send + Sync {
     fn fetch_blocktemplate(
         &self,
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
-        prev_p2p_share: [u8; 32],
+        prev_p2p_share: U256,
     ) -> Result<BlockFetch<BlockT>, Self::ErrorT>;
     fn submit_block(&self, block: &BlockT) -> Result<(), bitcoincore_rpc::Error>;
 
-    fn fetch_block(&self, hash: &[u8; 32]) -> Result<BlockT, bitcoincore_rpc::Error>;
+    fn fetch_block(&self, hash: &U256) -> Result<BlockT, bitcoincore_rpc::Error>;
 }
 
 impl BlockFetcher<bitcoin::Block> for bitcoincore_rpc::Client
@@ -46,7 +47,7 @@ where
     fn fetch_blocktemplate(
         &self,
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
-        prev_p2p_share: [u8; 32],
+        prev_p2p_share: U256,
     ) -> Result<BlockFetch<bitcoin::Block>, bitcoincore_rpc::Error> {
         use bitcoincore_rpc::json::*;
 
@@ -67,8 +68,8 @@ where
         })
     }
 
-    fn fetch_block(&self, hash: &[u8; 32]) -> Result<bitcoin::Block, bitcoincore_rpc::Error> {
-        self.get_block(&BlockHash::from_byte_array(hash.clone()))
+    fn fetch_block(&self, hash: &U256) -> Result<bitcoin::Block, bitcoincore_rpc::Error> {
+        self.get_block(&BlockHash::from_byte_array(hash.clone().to_be_bytes()))
     }
 
     fn submit_block(&self, block: &bitcoin::Block) -> Result<(), bitcoincore_rpc::Error> {

@@ -1,18 +1,16 @@
 use std::sync::Arc;
 use std::thread;
 
-use bitcoincore_rpc::bitcoin;
+
 
 use crate::config::ProtocolServerConfig;
 use crate::p2p::networking::protocol::ProtocolP2P;
 use crate::protocol::Protocol;
 
-use crate::{protocol::JsonRpcProtocol, server::Server};
+use crate::{server::Server};
 
 use super::stratum::StratumProtocol;
-use super::{config::StratumConfig, job_fetcher::BlockFetcher, stratum_v1::StratumV1};
-
-type SProtocol = JsonRpcProtocol<StratumV1>;
+use super::{config::StratumConfig};
 
 pub struct StratumServer<T: StratumProtocol> {
     server: Server<T>,

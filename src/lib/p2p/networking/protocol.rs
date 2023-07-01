@@ -2,12 +2,10 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     path::Path,
-    str::FromStr,
     sync::{Arc, Mutex},
 };
 
-use bitcoin::{address::NetworkUnchecked, Network};
-use crypto_bigint::U256;
+use crypto_bigint::{U256};
 
 use io_arc::IoArc;
 use log::{info, warn};
@@ -23,19 +21,17 @@ use crate::{
 };
 
 use super::{
-    block::Block,
     block_manager::BlockManager,
     config::ConfigP2P,
     hard_config::{
-        CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER,
-        PPLNS_SHARE_UNITS,
+        CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS,
     },
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
     pplns::{ScoreChanges, WindowPPLNS},
     target_manager::TargetManager,
-    utils::time_now_ms,
+    utils::time_now_ms, share::ShareP2P,
 };
 use crate::coins::coin::Coin;
 use bincode::{self};
@@ -54,48 +50,6 @@ pub struct ProtocolP2P<C: Coin> {
 
 pub type Reward = u64;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ShareP2P<C: Coin > {
-    pub block: C::BlockT,
-    pub encoded: CoinabseEncodedP2P,
-    // #[serde(skip)]
-    // hash: U256,
-    pub score_changes: ScoreChanges<C::Address>,
-}
-use crate::address::Address;
-
-impl<C: Coin> ShareP2P<C> {
-    pub fn fetch_genesis(fetcher: &impl BlockFetcher<C::BlockT>) -> Self {
-        let block = fetcher
-            .fetch_block(
-                &C::main_config_p2p()
-                    .protocol_config
-                    .consensus
-                    .genesis_block_hash,
-            )
-            .expect("Failed to fetch genesis pool block");
-
-        Self {
-            encoded: CoinabseEncodedP2P {
-                prev_hash: U256::ZERO,
-            },
-            score_changes: ScoreChanges {
-                added: Vec::from([(
-                    C::Address::from_string(C::DONATION_ADDRESS).expect("INVALID DEV ADDRESS"),
-                    PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
-                )]),
-                removed: Vec::new(),
-            },
-            block,
-        }
-    }
-}
-
-// p2pool difficulty (bits) is encoded inside block generation tx
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct CoinabseEncodedP2P {
-    pub prev_hash: U256,
-}
 
 impl<C: Coin> Protocol for ProtocolP2P<C> {
     type Request = Vec<u8>;
@@ -110,11 +64,12 @@ impl<C: Coin> Protocol for ProtocolP2P<C> {
         let daemon_cli = C::Fetcher::new(conf.0.rpc_url.as_ref());
         let pool_genesis = daemon_cli
             .fetch_block(&conf.0.consensus.genesis_block_hash)
-            .expect("Failed to get genesis block.");
+            .expect("Failed to get genesis block");
+        let genesis_share = ShareP2P::from_genesis_block(pool_genesis.clone());
 
         Self {
-            pplns_window: Mutex::new(WindowPPLNS::new(&daemon_cli)),
-            block_manager: BlockManager::new(&daemon_cli, data_dir.clone()),
+            pplns_window: Mutex::new(WindowPPLNS::new(genesis_share.clone())),
+            block_manager: BlockManager::new(genesis_share, data_dir.clone()),
             daemon_cli,
             target_manager: Mutex::new(TargetManager::new::<C>(
                 pool_genesis,

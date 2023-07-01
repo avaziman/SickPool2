@@ -1,7 +1,9 @@
 {
   "address": "127.0.0.1:1968",
   "processing_threads": 2,
+  "rpc_url": "127.0.0.1:18443",
   "peer_connections": 32,
   "block_time": "1s",
-  "diff_adjust_blocks": 16
+  "diff_adjust_blocks": 16,
+  "genesis_block_hash": "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
 }

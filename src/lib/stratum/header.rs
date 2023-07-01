@@ -7,9 +7,6 @@ use crypto_bigint::{U256, Encoding};
 use serde::{Serialize};
 use serde::de::DeserializeOwned;
 
-
-
-
 pub trait BlockHeader : Clone + std::fmt::Debug + Serialize + DeserializeOwned {
     fn get_hash(&self) -> U256;
     fn get_target(&self) -> U256;

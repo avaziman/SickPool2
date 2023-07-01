@@ -1,11 +1,15 @@
-use std::{time::Duration};
+use std::time::Duration;
 
 use crypto_bigint::{CheckedMul, U256};
 use log::{info, warn};
 
-use crate::{p2p::networking::{hard_config::MAX_RETARGET_FACTOR, difficulty::{MAX_TARGET}}, stratum::header::BlockHeader, coins::coin::Coin};
+use crate::{
+    coins::coin::Coin,
+    p2p::networking::{difficulty::MAX_TARGET, hard_config::MAX_RETARGET_FACTOR},
+    stratum::header::BlockHeader,
+};
 
-use super::{block::Block};
+use super::block::Block;
 
 struct Adjustment {
     time: u32,
@@ -24,10 +28,10 @@ pub struct TargetManager {
 // TODO: save pool start time and block maybe
 impl TargetManager {
     pub fn new<C: Coin>(genesis_block: C::BlockT, target_time: Duration, diff_adjust: u32) -> Self {
-        let target = genesis_block.get_header().get_target();
+        // let target = genesis_block.get_header().get_target();
         let target = MAX_TARGET;
 
-        // info!("Initial p2p target: {}, difficulty: {}", target, get_diff1_score(&target));
+        info!("Initial p2p target: {}, difficulty: ", target);
 
         info!("MAX TARGET: {}", MAX_TARGET);
 
@@ -35,7 +39,7 @@ impl TargetManager {
 
         Self {
             last_adjustment: Adjustment {
-                time: 1687522225,
+                time: genesis_block.get_header().get_time(),
                 target,
                 height: 0,
             },

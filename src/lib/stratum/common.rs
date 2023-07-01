@@ -1,7 +1,6 @@
 use crypto_bigint::U256;
-use log::info;
 
-use crate::{p2p::networking::block::Block, coins::coin::Coin};
+use crate::{p2p::networking::block::Block};
 
 use super::{
     client::StratumClient,
@@ -40,12 +39,12 @@ where
 
             client.submitted_shares.insert(low);
 
-            info!("Hash {:x}", hash);
-            info!("Target {:x}", client.target);
+            // info!("Hash {:x}", hash);
+            // info!("Target {:x}", client.target);
 
-            /* if hash <= job.target {
+            if hash <= job.target {
                 ShareResult::Block(hash)
-            } else  */if hash <= client.target {
+            } else if hash <= client.target {
                 ShareResult::Valid(hash)
             } else {
                 ShareResult::Invalid()

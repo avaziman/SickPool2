@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crypto_bigint::U256;
 use log::{error, info};
 
-use super::{block::Block, protocol::ProtocolP2P};
+use super::{protocol::ProtocolP2P};
 use crate::{
     coins::coin::Coin,
-    stratum::{handler::StratumHandler, job_fetcher::BlockFetcher},
+    stratum::{handler::StratumHandler},
 };
 
 impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
@@ -22,10 +22,11 @@ impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
             return;
         }
 
+        let mut window_lock = self.pplns_window.lock().unwrap();
         match self.block_manager.process_share(
             block.clone(),
             &lock,
-            &self.pplns_window.lock().unwrap(),
+            &window_lock,
         ) {
             Ok(valid_p2p_share) => {
                 info!(
@@ -33,7 +34,7 @@ impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
                     &valid_p2p_share.hash
                 );
 
-                self.pplns_window.lock().unwrap().add(valid_p2p_share);
+                window_lock.add(valid_p2p_share);
             }
             Err(e) => {
                 error!("LOCAL P2P share rejected for: {:?}", e);
@@ -41,8 +42,8 @@ impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
         }
     }
 
-    fn on_new_block(&self, height: u32, block: &C::BlockT) {
-        self.block_manager.new_block(height, block);
+    fn on_new_block(&self, height: u32, block_hash: &U256) {
+        self.block_manager.new_block(height, block_hash);
         // let mut target_lock = self.target_manager.lock().unwrap();
         // target_lock.adjust(height, block);
 
@@ -80,8 +81,8 @@ impl<C: Coin> StratumHandler<C> for CompleteStrartumHandler<C> {
     fn on_new_block(
         &self,
         height: u32,
-        block: &C::BlockT,
+        block_hash: &U256,
     ) {
-        self.p2p.on_new_block(height, block)
+        self.p2p.on_new_block(height, block_hash)
     }
 }

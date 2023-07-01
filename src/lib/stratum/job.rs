@@ -10,9 +10,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     p2p::networking::{
-        block::Block, bitcoin::SCRIPTLESS_COINB1_SIZE,
+        bitcoin::SCRIPTLESS_COINB1_SIZE,
     },
-    sickrpc::RpcReqBody, coins::{coin::Coin, bitcoin::Btc},
+    sickrpc::RpcReqBody,
 };
 
 use super::{header::BlockHeader, job_fetcher::BlockFetch, protocol::SubmitReqParams};

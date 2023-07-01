@@ -4,18 +4,14 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use bitcoin::address::NetworkUnchecked;
-use bitcoin::Network;
-
 use serde::{Deserialize, Serialize};
 
-use crate::{coins::coin::Coin, stratum::job_fetcher::BlockFetcher, address::Address};
+use crate::{address::Address, coins::coin::Coin};
 
 use super::{
-    block::{Block, EncodeErrorP2P},
+    block::EncodeErrorP2P,
     block_manager::ProcessedShare,
-    hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
-    protocol::ShareP2P,
+    hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS}, share::ShareP2P,
 };
 
 pub type Score = u64;
@@ -28,18 +24,18 @@ pub struct ScoreChanges<Address> {
 
 impl<A: Address> ScoreChanges<A> {
     pub fn new(
-        mut current_scores: Vec<(A::FromScript, u64)>,
+        current_scores: Vec<(A::FromScript, u64)>,
         mut last_scores: HashMap<A, u64>,
-    ) -> Result<ScoreChanges<A>,EncodeErrorP2P> {
+    ) -> Result<ScoreChanges<A>, EncodeErrorP2P> {
         let mut removed = Vec::new();
         let mut added = Vec::new();
         let mut new_addrs = 0;
         let exp_new_addrs = current_scores.len() - last_scores.len();
 
         for (key, score) in current_scores.into_iter() {
-            let addr = match A::from_script(&key){
+            let addr = match A::from_script(&key) {
                 Ok(k) => k,
-                Err(e) => return Err(EncodeErrorP2P::InvalidAddress),
+                Err(_e) => return Err(EncodeErrorP2P::InvalidAddress),
             };
 
             match last_scores.remove(&addr) {
@@ -91,9 +87,9 @@ pub fn get_score(rewarded: u64, total_reward: u64) -> u64 {
 }
 
 impl<C: Coin> WindowPPLNS<C> {
-    pub fn new(fetcher: &impl BlockFetcher<C::BlockT>) -> Self {
+    pub fn new(genesis: ShareP2P<C>) -> Self {
         let genesis_entry = WindowEntry {
-            share: ShareP2P::<C>::fetch_genesis(fetcher),
+            share: genesis,
             score: PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
         };
 
@@ -104,11 +100,11 @@ impl<C: Coin> WindowPPLNS<C> {
             address_scores: HashMap::new(),
         };
 
-        me.internal_add(genesis_entry);
+        me.add_entry(genesis_entry);
         me
     }
 
-    fn internal_add(&mut self, entry: WindowEntry<C>) {
+    fn add_entry(&mut self, entry: WindowEntry<C>) {
         self.pplns_sum += entry.score;
         self.add_scores(&entry.share.score_changes.added);
         self.pplns_window.push_front(entry);
@@ -121,16 +117,23 @@ impl<C: Coin> WindowPPLNS<C> {
         };
 
         self.remove_scores(&entry.share.score_changes.removed);
-        self.internal_add(entry);
+        self.add_entry(entry);
 
         // clean expired pplns...
         // pplns window must always be full.
         loop {
             let entry = self.pplns_window.pop_back().unwrap();
 
-            self.pplns_sum -= entry.score;
+            if self.pplns_sum - entry.score > PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS {
+                self.pplns_sum -= entry.score;
+            } else {
+                let remaining = self.pplns_sum - PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS;
+                self.pplns_window.push_back(WindowEntry {
+                    share: entry.share,
+                    score: remaining,
+                });
+                self.pplns_sum -= remaining;
 
-            if self.pplns_sum - entry.score > PPLNS_DIFF_MULTIPLIER {
                 break;
             }
         }
@@ -208,6 +211,7 @@ impl<C: Coin> WindowPPLNS<C> {
     //     }
     // }
 
+    // called after adding.
     fn remove_scores(&mut self, scores: &Vec<(C::Address, Score)>) {
         for (added_to, amt) in scores {
             *self.address_scores.get_mut(&added_to).unwrap() -= amt;

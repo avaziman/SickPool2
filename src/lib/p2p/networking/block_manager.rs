@@ -1,7 +1,6 @@
 // only save tip in memory the rest dump on disk
 // only keep the blocks of the current window.
 
-use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -11,7 +10,6 @@ use crate::coins::coin::Coin;
 use crate::p2p::networking::difficulty::get_diff_score;
 use crate::p2p::networking::pplns::ScoreChanges;
 use crate::stratum::header::BlockHeader;
-use crate::stratum::job_fetcher::BlockFetcher;
 use crypto_bigint::U256;
 use log::{info, warn};
 
@@ -20,17 +18,23 @@ use super::block::EncodeErrorP2P;
 use super::messages::ShareVerificationError;
 use super::pplns::{self, Score, WindowPPLNS};
 
+use super::share::ShareP2P;
 use super::target_manager::TargetManager;
-use super::{block::Block, protocol::ShareP2P};
+use super::{block::Block};
+
+// we don't need the entire block for verification...
+pub struct BlockVerifyContext {
+    hash: U256,
+}
 
 pub struct BlockManager<C: Coin> {
     blocks_dir: Box<Path>,
     p2p_tip: Mutex<ShareP2P<C>>,
-    main_tip: Mutex<C::BlockT>,
+    main_tip: Mutex<BlockVerifyContext>,
     current_height: AtomicU32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ProcessedShare<C: Coin> {
     pub inner: ShareP2P<C>,
     pub hash: U256,
@@ -38,8 +42,8 @@ pub struct ProcessedShare<C: Coin> {
 }
 
 impl<C: Coin> BlockManager<C> {
-    pub fn new(fetcher: &impl BlockFetcher<C::BlockT>, data_dir: Box<Path>) -> Self {
-        let genesis: ShareP2P<C> = ShareP2P::fetch_genesis(fetcher);
+    pub fn new(genesis: ShareP2P<C>, data_dir: Box<Path>) -> Self {
+        // let genesis: ShareP2P<C> = ShareP2P::from_genesis_block(fetcher);
 
         let mut data_dir = data_dir.clone().to_path_buf();
         data_dir.push("shares");
@@ -54,7 +58,9 @@ impl<C: Coin> BlockManager<C> {
 
         Self {
             blocks_dir,
-            main_tip: Mutex::new(genesis.block.clone()),
+            main_tip: Mutex::new(BlockVerifyContext {
+                hash: genesis.block.get_header().get_hash(),
+            }),
             p2p_tip: Mutex::new(genesis),
             current_height: AtomicU32::new(0),
         }
@@ -71,6 +77,15 @@ impl<C: Coin> BlockManager<C> {
         current_rewards
     }
 
+    // println!("p2p tip hash:  {}", p2p_tip.block.get_header().get_hash());
+    // std::fs::write(
+    //     "tests/sample_first_share.json",
+    //     serde_json::to_string_pretty(&block).unwrap(),
+    // )
+    // .unwrap();
+    // panic!();
+
+    // TODO: save the hashes
     pub fn process_share(
         &self,
         block: C::BlockT,
@@ -80,18 +95,10 @@ impl<C: Coin> BlockManager<C> {
         let mut p2p_tip = self.p2p_tip.lock().unwrap();
 
         let p2ptarget = p2ptarget.target();
-        // let share = block.into_p2p(&p2p_tip, &window.address_scores, self.height())?;
 
-        // std::fs::write(
-        //     "tests/sample_first_share.json",
-        //     serde_json::to_string_pretty(&block).unwrap(),
-        // )
-        // .unwrap();
-        // panic!();
-
-        // if !block.verify_main_consensus(self.height()) {
-        //     return Err(ShareVerificationError::BadLinkMain);
-        // }
+        if !block.verify_main_consensus(self.height()) {
+            return Err(ShareVerificationError::BadLinkMain);
+        }
 
         let p2p_encoded = block.deserialize_p2p_encoded()?;
         let current_scores = Self::get_scores(&block);
@@ -102,12 +109,11 @@ impl<C: Coin> BlockManager<C> {
             score_changes: ScoreChanges::new(current_scores, window.address_scores.clone())?,
         };
 
-        // println!("GIVEN PREV: {}", share.block.get_header().get_prev());
-        // println!("EXP PREV: {}", self.main_tip.lock().unwrap().get_header().get_hash());
+        let main_hash = self.main_tip.lock().unwrap().hash;
         // check mainnet link
-        if share.block.get_header().get_prev()
-            != self.main_tip.lock().unwrap().get_header().get_hash()
-        {
+        if share.block.get_header().get_prev() != main_hash {
+            info!("GIVEN PREV: {}", share.block.get_header().get_prev());
+            info!("EXP PREV: {}", main_hash);
             return Err(ShareVerificationError::BadLinkMain);
         }
 
@@ -121,7 +127,7 @@ impl<C: Coin> BlockManager<C> {
 
         let hash: crypto_bigint::Uint<4> = share.block.get_header().get_hash();
         if &hash > p2ptarget {
-            eprintln!(
+            warn!(
                 "Insufficient diffiuclty: given {}, target: {}",
                 &hash, p2ptarget
             );
@@ -131,8 +137,8 @@ impl<C: Coin> BlockManager<C> {
 
         // share score is: share_diff / target_diff
         let score = get_diff_score(&hash, &share.block.get_header().get_target());
-        println!("Share score: {}", score);
-        println!("HASH: {}", hash);
+        // println!("Share score: {}", score);
+        // println!("HASH: {}", hash);
 
         if window.verify_changes(&share.score_changes, score) {
             warn!("Score changes are unbalanced...");
@@ -156,15 +162,22 @@ impl<C: Coin> BlockManager<C> {
         self.p2p_tip.lock().unwrap()
     }
 
-    pub fn main_tip(&self) -> MutexGuard<C::BlockT> {
+    pub fn main_tip(&self) -> MutexGuard<BlockVerifyContext> {
         self.main_tip.lock().unwrap()
     }
 
-    pub fn new_block(&self, height: u32, block: &C::BlockT) {
+    pub fn new_block(&self, height: u32, block_hash: &U256) {
         self.current_height.store(height, Ordering::Relaxed);
-        *self.main_tip.lock().unwrap() = block.clone();
+        let mut lock = self.main_tip.lock().unwrap();
+        *lock = BlockVerifyContext {
+            hash: block_hash.clone(),
+        };
 
-        info!("New mainchain block, height: {}", self.height());
+        info!(
+            "New mainchain block: {}, height: {}",
+            lock.hash,
+            self.height(),
+        );
     }
 
     // fn save_share(&self, share: &ShareP2P<T>) -> std::io::Result<()> {

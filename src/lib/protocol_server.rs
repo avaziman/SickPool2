@@ -1,7 +1,6 @@
 #[cfg(test)]
 pub mod tests {
 
-    use bitcoincore_rpc::Client;
 
     use crate::protocol::JsonRpcProtocol;
     use crate::stratum::protocol::AuthorizeReqParams;
@@ -14,7 +13,7 @@ pub mod tests {
         let req = String::from(req);
 
         // let rpc_result: (String, Token) = rpc_server::parse_req(&req).unwrap();
-        let result = JsonRpcProtocol::<StratumV1<Client>>::parse_request(&req.as_bytes()).unwrap();
+        let result = JsonRpcProtocol::<StratumV1>::parse_request(&req.as_bytes()).unwrap();
         // JsonRpcProtocol::parse_req(&req).unwrap();
         // assert_eq!(result id: Some(4), method: String::from("mining.submit"), jsonrpc: None })
         assert_eq!(result.id, Some(4));
@@ -22,7 +21,7 @@ pub mod tests {
         assert_eq!(result.jsonrpc, None);
 
         let stratum_req =
-            StratumV1::<bitcoincore_rpc::Client>::parse_stratum_req(result.method, result.params)
+            StratumV1::parse_stratum_req(result.method, result.params)
                 .unwrap();
 
         assert_eq!(
@@ -44,14 +43,14 @@ pub mod tests {
         let req = String::from(req);
 
         // let rpc_result: (String, Token) = rpc_server::parse_req(&req).unwrap();
-        let result = JsonRpcProtocol::<StratumV1<Client>>::parse_request(&req.as_bytes()).unwrap();
+        let result = JsonRpcProtocol::<StratumV1>::parse_request(&req.as_bytes()).unwrap();
 
         assert_eq!(result.id, Some(2));
         assert_eq!(result.method, String::from("mining.authorize"));
         assert_eq!(result.jsonrpc, None);
 
         let stratum_req =
-            StratumV1::<bitcoincore_rpc::Client>::parse_stratum_req(result.method, result.params)
+            StratumV1::parse_stratum_req(result.method, result.params)
                 .unwrap();
 
         assert_eq!(

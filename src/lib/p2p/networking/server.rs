@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::{Arc};
 
-use bitcoincore_rpc::bitcoin;
+
 
 
 
@@ -20,7 +20,6 @@ use crate::protocol::Protocol;
 use crate::{
     config::ProtocolServerConfig,
     server::Server,
-    stratum::{job_fetcher::BlockFetcher},
 };
 
 // can operate without a stratum server

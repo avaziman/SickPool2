@@ -1,9 +1,9 @@
+use crypto_bigint::U256;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::stratum::header::BlockHeader;
 
-use super::{protocol::CoinabseEncodedP2P};
 
 #[derive(Debug, PartialEq)]
 pub enum EncodeErrorP2P {
@@ -15,7 +15,9 @@ pub enum EncodeErrorP2P {
     InvalidAddress,
 }
 use std::hash::Hash;
-pub trait Block: Clone + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync {
+
+use super::share::CoinabaseEncodedP2P;
+pub trait Block: Clone + PartialEq + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync {
     type HeaderT: BlockHeader;
     type BlockTemplateT;
     type Script: Send + Sync + PartialEq + Eq + Hash + Clone;
@@ -25,11 +27,11 @@ pub trait Block: Clone + std::fmt::Debug + Serialize + DeserializeOwned + Send +
     fn from_block_template(
         template: &Self::BlockTemplateT,
         vout: impl Iterator<Item = (Self::Script, u64)>,
-        prev_p2p_share: [u8; 32],
+        prev_p2p_share: U256,
     ) -> (Self, Vec<[u8; 32]>);
     fn deserialize_rewards(&self) -> Vec<(Self::Script, u64)>;
 
-    fn deserialize_p2p_encoded(&self) -> Result<CoinabseEncodedP2P, EncodeErrorP2P>;
+    fn deserialize_p2p_encoded(&self) -> Result<CoinabaseEncodedP2P, EncodeErrorP2P>;
     fn verify_main_consensus(&self, height: u32) -> bool;
 
     fn get_coinbase_outs(&self) -> u64;

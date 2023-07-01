@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use bitcoin::ScriptBuf;
+use crypto_bigint::U256;
 use log::info;
 
-use crate::{p2p::networking::{block::Block}, stratum::job::Job, coins::coin::Coin};
+use crate::{p2p::networking::{block::Block}, stratum::job::Job};
 
 use super::{header::BlockHeader, job::JobBtc, job_fetcher::BlockFetcher};
 
@@ -23,7 +24,7 @@ where
         let mut jobs = HashMap::with_capacity(16);
 
         // this is an invalid job, no outputs TODO: ...
-        match header_fetcher.fetch_blocktemplate(Vec::new().into_iter(), [0u8; 32]) {
+        match header_fetcher.fetch_blocktemplate(Vec::new().into_iter(), U256::ZERO) {
             Ok(res) => {
                 let id = 0;
                 let job = JobBtc::new(id, res);
@@ -42,7 +43,7 @@ where
         &mut self,
         header_fetcher: &Fetcher,
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
-        prev_p2p_share: [u8; 32],
+        prev_p2p_share: U256,
     ) -> Result<Option<&JobBtc<bitcoin::Block, E>>, Fetcher::ErrorT> {
         let fetched = header_fetcher.fetch_blocktemplate(vout, prev_p2p_share)?;
 

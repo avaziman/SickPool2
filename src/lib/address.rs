@@ -1,14 +1,12 @@
-use bitcoin::{address::NetworkUnchecked, Script, ScriptBuf};
+use bitcoin::{address::NetworkUnchecked};
 use std::{hash::Hash, str::FromStr};
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     coins::{
         bitcoin::{Btc, MyBtcAddr},
-        coin::Coin,
     },
-    p2p::networking::block::{Block, EncodeErrorP2P},
 };
 pub trait Address:
     'static

@@ -1,18 +1,18 @@
-use bitcoincore_rpc::{
-    bitcoin::{self},
-    Client,
-};
+use bitcoin::hashes::Hash;
+use bitcoincore_rpc::bitcoin::{self};
 
-use crypto_bigint::Encoding;
+use crypto_bigint::{Encoding, U256};
 use log::{error, info, warn};
 
-use crate::{coins::bitcoin::{Btc, MyBtcAddr}, address::Address};
 use crate::coins::coin::Coin;
+use crate::{
+    address::Address,
+    coins::bitcoin::{Btc, MyBtcAddr},
+};
 use slab::Slab;
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    str::FromStr,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Mutex, RwLock,
@@ -91,7 +91,7 @@ impl StratumV1 {
             }
             StratumRequestsBtc::Authorize(params) => {
                 // TODO: get address
-                let pk = match MyBtcAddr::from_string(&params.username) {
+                let _pk = match MyBtcAddr::from_string(&params.username) {
                     Ok(k) => {
                         // let atype = k.assume_checked().address_type();
                         // info!("Type: {:?}", atype);
@@ -127,7 +127,7 @@ impl StratumV1 {
                     ),
                     job.broadcast_message.clone(),
                 ]);
-                ctx.lock().unwrap().target = get_target_from_diff_units(diff);
+                ctx.lock().unwrap().target = get_target_from_diff_units(diff, &Btc::DIFF1);
 
                 Ok((Value::Bool(true), notifs))
             }
@@ -168,13 +168,17 @@ impl StratumV1 {
                     error!("Failed to submit block: {}", e);
                 }
 
-                // self.handler
-                //     .on_valid_share(&MyBtcAddr::from_string(address).unwrap(), &job.block, diff)
+                self.handler.on_valid_share(
+                    &MyBtcAddr::from_string(&address).unwrap(),
+                    &job.block,
+                    diff,
+                )
             }
-            ShareResult::Valid(diff) => {
-                // self.handler
-                //     .on_valid_share(&address.try_into().unwrap(), &job.unwrap().block, diff)
-            }
+            ShareResult::Valid(diff) => self.handler.on_valid_share(
+                &MyBtcAddr::from_string(&address).unwrap(),
+                &job.unwrap().block,
+                diff,
+            ),
             _ => {}
         };
 
@@ -210,32 +214,42 @@ impl StratumProtocol for StratumV1 {
         let mut lock = self.job_manager.write().unwrap();
         let res = lock.get_new_job(
             &self.daemon_cli,
-            self.handler.p2p.pplns_window.lock().unwrap().address_scores.iter().map(|(addr, score)| {
-                (addr.to_script(), *score)
-            }),
+            self.handler
+                .p2p
+                .pplns_window
+                .lock()
+                .unwrap()
+                .address_scores
+                .iter()
+                .map(|(addr, score)| (addr.to_script(), *score)),
             self.handler
                 .p2p
                 .block_manager
                 .p2p_tip()
                 .block
                 .get_header()
-                .get_hash()
-                .to_le_bytes(),
+                .get_hash(),
         );
 
         if let Ok(job) = res {
             if let Some(job) = job {
                 let lock = self.subscribed_clients.lock().unwrap();
-                info!(
-                    "New job! broadcasting to {} clients: {:?}",
-                    lock.len(),
-                    lock
-                );
+                info!("New job! broadcasting to {} clients", lock.len(),);
 
                 for (_token, notifier) in &*lock {
                     JsonRpcProtocol::<Self>::notify(job.broadcast_message.clone(), notifier);
                 }
-                self.handler.on_new_block(job.height, &job.block);
+                // the received block is the one in the last job with the found params
+                self.handler.on_new_block(
+                    job.height,
+                    &U256::from_le_bytes(
+                        job.block
+                            .header
+                            .prev_blockhash
+                            .as_raw_hash()
+                            .to_byte_array(),
+                    ),
+                );
             }
         }
     }
