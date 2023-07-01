@@ -4,7 +4,6 @@ use serde::Serialize;
 
 use crate::stratum::header::BlockHeader;
 
-
 #[derive(Debug, PartialEq)]
 pub enum EncodeErrorP2P {
     // the data encoded inside the coinbase tx is invalid
@@ -17,7 +16,9 @@ pub enum EncodeErrorP2P {
 use std::hash::Hash;
 
 use super::share::CoinabaseEncodedP2P;
-pub trait Block: Clone + PartialEq + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync {
+pub trait Block:
+    Clone + PartialEq + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync
+{
     type HeaderT: BlockHeader;
     type BlockTemplateT;
     type Script: Send + Sync + PartialEq + Eq + Hash + Clone;

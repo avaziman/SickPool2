@@ -9,7 +9,7 @@ use bitcoincore_rpc::bitcoin::hash_types::TxMerkleNode;
 
 use bitcoincore_rpc::bitcoin::{self, CompactTarget, Network, TxOut};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetBlockTemplateResult;
-use crypto_bigint::{U256, Encoding};
+use crypto_bigint::{Encoding, U256};
 use itertools::Itertools;
 use log::warn;
 
@@ -190,7 +190,6 @@ fn generate_bitcoin_script(main_height: u64, prev_p2p_share: &[u8; 32]) -> Scrip
 pub mod tests {
     use std::{fs, path::PathBuf, time::Duration};
 
-
     use crate::{
         coins::bitcoin::Btc,
         p2p::networking::{
@@ -202,7 +201,7 @@ pub mod tests {
         },
         stratum::header::BlockHeader,
     };
-use pretty_assertions::{assert_eq};
+    use pretty_assertions::assert_eq;
 
     // #[test]
     // fn serialize_first_share_p2p() {}
@@ -219,9 +218,11 @@ use pretty_assertions::{assert_eq};
         let genesis_block = bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Regtest);
         let genesis_share = ShareP2P::from_genesis_block(genesis_block.clone());
 
-        let target_man =
-            TargetManager::new::<Btc>(genesis_block, Duration::from_secs(1), 10);
-        let block_manager = BlockManager::new(genesis_share.clone(), PathBuf::from("tests/").into_boxed_path());
+        let target_man = TargetManager::new::<Btc>(genesis_block, Duration::from_secs(1), 10);
+        let block_manager = BlockManager::new(
+            genesis_share.clone(),
+            PathBuf::from("tests/").into_boxed_path(),
+        );
         let res = block_manager.process_share(
             candidate.clone(),
             &target_man,
