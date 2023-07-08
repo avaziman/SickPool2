@@ -4,7 +4,7 @@ use bitcoin::ScriptBuf;
 use crypto_bigint::U256;
 use log::info;
 
-use crate::{p2p::networking::{block::Block}, stratum::job::Job};
+use crate::{p2p::networking::block::Block, stratum::job::Job};
 
 use super::{header::BlockHeader, job::JobBtc, job_fetcher::BlockFetcher};
 
@@ -23,8 +23,8 @@ where
     ) -> JobManager<JobBtc<bitcoin::Block, E>> {
         let mut jobs = HashMap::with_capacity(16);
 
-        // this is an invalid job, no outputs TODO: ...
-        match header_fetcher.fetch_blocktemplate(Vec::new().into_iter(), U256::ZERO) {
+        // this is an invalid job, no outputs, a new one should be generated immediately
+        match header_fetcher.fetch_blocktemplate(std::iter::empty(), U256::ZERO) {
             Ok(res) => {
                 let id = 0;
                 let job = JobBtc::new(id, res);
@@ -69,7 +69,7 @@ where
         self.job_count
     }
 
-    pub fn last_job(&self) -> &JobBtc<bitcoin::Block, E>{
+    pub fn last_job(&self) -> &JobBtc<bitcoin::Block, E> {
         &self.jobs[&(self.job_count - 1)]
     }
 

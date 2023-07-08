@@ -15,7 +15,7 @@ use crate::{
     sickrpc::RpcReqBody,
 };
 
-use super::{header::BlockHeader, job_fetcher::BlockFetch, protocol::SubmitReqParams};
+use super::{header::BlockHeader, job_fetcher::BlockFetch, stratum_v1::SubmitReqParams};
 
 pub trait Job<T, E>: Clone + std::fmt::Debug {
     type SubmitParams;

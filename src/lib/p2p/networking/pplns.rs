@@ -1,6 +1,6 @@
 // once the pplns window is full it will never empty again,
 // so accounting for a non full pplns window state is just adding more bug causing complexity
-// thus for simplicity the pplns (and support :) window will start full of dev fee shares, and will never be empty.
+// thus for simplicity the pplns window will start full of genesis miner fee shares, and will never be empty.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -11,7 +11,8 @@ use crate::{address::Address, coins::coin::Coin};
 use super::{
     block::EncodeErrorP2P,
     block_manager::ProcessedShare,
-    hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS}, share::ShareP2P,
+    hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
+    share::ShareP2P,
 };
 
 pub type Score = u64;
@@ -30,7 +31,7 @@ impl<A: Address> ScoreChanges<A> {
         let mut removed = Vec::new();
         let mut added = Vec::new();
         let mut new_addrs = 0;
-        let exp_new_addrs = current_scores.len() - last_scores.len();
+        let exp_new_addrs = current_scores.len() as i64 - last_scores.len() as i64;
 
         for (key, score) in current_scores.into_iter() {
             let addr = match A::from_script(&key) {
@@ -78,19 +79,28 @@ pub struct WindowEntry<C: Coin> {
 }
 // pub static PPLNS_DIFF_MULTIPLIER_DECIMAL: Decimal =PPLNS_DIFF_MULTIPLIER.into();
 
+pub const MAX_SCORE : u64 = PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS;
+
 pub fn get_reward(score: Score, total_reward: u64) -> u64 {
-    score * total_reward / (PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS)
+    score * total_reward / (MAX_SCORE)
 }
 
 pub fn get_score(rewarded: u64, total_reward: u64) -> u64 {
-    (rewarded * PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS) / total_reward
+    (rewarded * MAX_SCORE) / total_reward
 }
 
 impl<C: Coin> WindowPPLNS<C> {
     pub fn new(genesis: ShareP2P<C>) -> Self {
+        assert_eq!(genesis.score_changes.added.len(), 1);
+        assert_eq!(genesis.score_changes.removed.len(), 0);
+        assert_eq!(
+            genesis.score_changes.added[0].1,
+            MAX_SCORE
+        );
+
         let genesis_entry = WindowEntry {
             share: genesis,
-            score: PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
+            score: MAX_SCORE,
         };
 
         let mut me = Self {
@@ -124,10 +134,10 @@ impl<C: Coin> WindowPPLNS<C> {
         loop {
             let entry = self.pplns_window.pop_back().unwrap();
 
-            if self.pplns_sum - entry.score > PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS {
+            if self.pplns_sum - entry.score > MAX_SCORE {
                 self.pplns_sum -= entry.score;
             } else {
-                let remaining = self.pplns_sum - PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS;
+                let remaining = self.pplns_sum - MAX_SCORE;
                 self.pplns_window.push_back(WindowEntry {
                     share: entry.share,
                     score: remaining,
@@ -139,7 +149,7 @@ impl<C: Coin> WindowPPLNS<C> {
         }
 
         // self.oldest_height = last_removed.share.encoded.height;
-        debug_assert_eq!(self.pplns_sum, PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS);
+        debug_assert_eq!(self.pplns_sum, MAX_SCORE);
     }
 
     pub fn verify_changes(&self, changes: &ScoreChanges<C::Address>, score: Score) -> bool {

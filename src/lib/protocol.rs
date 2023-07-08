@@ -11,8 +11,7 @@ use std::{
 
 use crate::{
     server::Notifier,
-    sickrpc::{ResultOrErr, RpcReqBody, RpcRequest, RpcResponse},
-    stratum::protocol::Discriminant,
+    sickrpc::{ResultOrErr, RpcReqBody, RpcRequest, RpcResponse}, stratum::stratum_v1::Discriminant,
 };
 
 // multithreaded

@@ -1,6 +1,7 @@
 // only save tip in memory the rest dump on disk
 // only keep the blocks of the current window.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -18,9 +19,9 @@ use super::block::EncodeErrorP2P;
 use super::messages::ShareVerificationError;
 use super::pplns::{self, Score, WindowPPLNS};
 
+use super::block::Block;
 use super::share::ShareP2P;
 use super::target_manager::TargetManager;
-use super::{block::Block};
 
 // we don't need the entire block for verification...
 pub struct BlockVerifyContext {
@@ -85,6 +86,20 @@ impl<C: Coin> BlockManager<C> {
     // .unwrap();
     // panic!();
 
+    pub fn decode_share(
+        block: C::BlockT,
+        last_scores: &HashMap<C::Address, u64>,
+    ) -> Result<ShareP2P<C>, ShareVerificationError> {
+        let current_scores = Self::get_scores(&block);
+        let p2p_encoded = block.deserialize_p2p_encoded()?;
+
+        Ok(ShareP2P {
+            block,
+            encoded: p2p_encoded,
+            score_changes: ScoreChanges::new(current_scores, last_scores.clone())?,
+        })
+    }
+
     // TODO: save the hashes
     pub fn process_share(
         &self,
@@ -100,14 +115,7 @@ impl<C: Coin> BlockManager<C> {
             return Err(ShareVerificationError::BadLinkMain);
         }
 
-        let p2p_encoded = block.deserialize_p2p_encoded()?;
-        let current_scores = Self::get_scores(&block);
-
-        let share: ShareP2P<C> = ShareP2P {
-            block,
-            encoded: p2p_encoded,
-            score_changes: ScoreChanges::new(current_scores, window.address_scores.clone())?,
-        };
+        let share: ShareP2P<C> = Self::decode_share(block, &window.address_scores)?;
 
         let main_hash = self.main_tip.lock().unwrap().hash;
         // check mainnet link
@@ -119,10 +127,7 @@ impl<C: Coin> BlockManager<C> {
 
         // check p2p link
         if share.encoded.prev_hash != p2p_tip.block.get_header().get_hash() {
-            // genesis doesnt encode anything
-            if self.height() != 0 {
-                return Err(ShareVerificationError::BadLinkP2P);
-            }
+            return Err(ShareVerificationError::BadLinkP2P);
         }
 
         let hash: crypto_bigint::Uint<4> = share.block.get_header().get_hash();

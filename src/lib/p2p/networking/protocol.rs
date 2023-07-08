@@ -1,20 +1,20 @@
 use std::{
     collections::HashMap,
-    fmt::Debug,
     path::Path,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
-use crypto_bigint::{U256};
-
+use crypto_bigint::U256;
 use io_arc::IoArc;
 use log::{info, warn};
 use mio::{net::TcpStream, Token};
+use sha2::digest::typenum::U2;
 
-use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
 use crate::{
+    address::Address,
     protocol::Protocol,
     server::{respond, Notifier},
     stratum::job_fetcher::BlockFetcher,
@@ -22,23 +22,25 @@ use crate::{
 
 use super::{
     block_manager::BlockManager,
-    config::ConfigP2P,
+    config::{ConfigP2P, ConsensusConfigP2P},
+    difficulty,
     hard_config::{
-        CURRENT_VERSION, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS,
+        CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER,
+        PPLNS_SHARE_UNITS,
     },
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
-    pplns::{ScoreChanges, WindowPPLNS},
+    pplns::{WindowPPLNS, self},
     target_manager::TargetManager,
-    utils::time_now_ms, share::ShareP2P,
+    utils::time_now_ms,
 };
 use crate::coins::coin::Coin;
 use bincode::{self};
 
 pub struct ProtocolP2P<C: Coin> {
     pub pplns_window: Mutex<WindowPPLNS<C>>,
-    pub conf: ConfigP2P,
+    pub conf: ConfigP2P<C::BlockT>,
     hello_message: Messages<C::BlockT>,
     pub peers: Mutex<HashMap<Token, Notifier>>,
     // data_dir: Box<Path>,
@@ -50,36 +52,34 @@ pub struct ProtocolP2P<C: Coin> {
 
 pub type Reward = u64;
 
-
 impl<C: Coin> Protocol for ProtocolP2P<C> {
     type Request = Vec<u8>;
     type Response = Vec<u8>;
-    type Config = (ConfigP2P, Box<Path>, u16); // data dir, listening port
+    type Config = (ConfigP2P<C::BlockT>, Box<Path>, u16); // data dir, listening port
     type ClientContext = Peer;
     type ProcessingContext = ();
 
     fn new(conf: Self::Config) -> Self {
-        let data_dir = conf.1;
+        let (config_p2p, data_dir, port) = conf;
 
-        let daemon_cli = C::Fetcher::new(conf.0.rpc_url.as_ref());
-        let pool_genesis = daemon_cli
-            .fetch_block(&conf.0.consensus.genesis_block_hash)
-            .expect("Failed to get genesis block");
-        let genesis_share = ShareP2P::from_genesis_block(pool_genesis.clone());
+        let daemon_cli = C::Fetcher::new(config_p2p.rpc_url.as_ref());
+        let genesis_share =
+            BlockManager::decode_share(config_p2p.consensus.genesis_share.clone(), &HashMap::new())
+                .unwrap();
 
         Self {
             pplns_window: Mutex::new(WindowPPLNS::new(genesis_share.clone())),
-            block_manager: BlockManager::new(genesis_share, data_dir.clone()),
-            daemon_cli,
+            hello_message: Messages::Hello(Hello::new(port, &config_p2p.consensus)),
             target_manager: Mutex::new(TargetManager::new::<C>(
-                pool_genesis,
-                conf.0.consensus.block_time,
-                conf.0.consensus.diff_adjust_blocks,
+                &genesis_share.block,
+                config_p2p.consensus.block_time,
+                config_p2p.consensus.diff_adjust_blocks,
             )),
+            block_manager: BlockManager::new(genesis_share, data_dir.clone()),
             peers: Mutex::new(HashMap::new()),
-            conf: conf.0,
-            hello_message: Messages::Hello(Hello::new(conf.2)),
+            conf: config_p2p,
             peer_manager: PeerManager::new(data_dir.clone()),
+            daemon_cli,
         }
     }
 
@@ -142,6 +142,40 @@ impl<C: Coin> Protocol for ProtocolP2P<C> {
 }
 
 impl<C: Coin> ProtocolP2P<C> {
+    pub fn get_new_pool_config(
+        rpc_url: String,
+        diff1: u64,
+        block_time_ms: u64,
+    ) -> ConfigP2P<C::BlockT> {
+        let daemon_cli = C::Fetcher::new(rpc_url.as_ref());
+
+        let rewards = [(
+            C::Address::from_string(DEV_ADDRESS_BTC_STR)
+                .unwrap()
+                .to_script(),
+            pplns::MAX_SCORE,
+        )];
+
+        let block = daemon_cli
+            .fetch_blocktemplate(rewards.into_iter(), U256::ZERO)
+            .unwrap()
+            // .expect("Failed to get block")
+            .block;
+
+        ConfigP2P {
+            peer_connections: 32,
+            consensus: ConsensusConfigP2P {
+                parent_pool_id: U256::ZERO,
+                block_time: Duration::from_millis(block_time_ms),
+                diff_adjust_blocks: 16,
+                genesis_share: block,
+                password: None,
+                target_1: difficulty::get_target_from_diff_units(diff1, &C::DIFF1),
+            },
+            rpc_url,
+        }
+    }
+
     #[doc(hidden)]
     pub fn parse_request(req: &[u8]) -> Result<Messages<C::BlockT>, bincode::Error> {
         bincode::deserialize(&req)

@@ -3,7 +3,6 @@ use crypto_bigint::U256;
 use crate::{coins::coin::Coin};
 
 
-
 pub trait StratumHandler<C: Coin> {
     fn on_valid_share(
         &self,

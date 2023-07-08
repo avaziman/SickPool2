@@ -30,7 +30,7 @@ pub struct ServerP2P<C: Coin> {
 }
 
 impl<C: Coin + 'static> ServerP2P<C> {
-    pub fn new(p2pconf: ProtocolServerConfig<ConfigP2P>, data_dir: Box<Path>) -> Self {
+    pub fn new(p2pconf: ProtocolServerConfig<ConfigP2P<C::BlockT>>, data_dir: Box<Path>) -> Self {
         let protocol = Arc::new(ProtocolP2P::new((
             p2pconf.protocol_config,
             data_dir,
@@ -39,7 +39,6 @@ impl<C: Coin + 'static> ServerP2P<C> {
         let server = Server::new(p2pconf.server_config, protocol.clone());
 
         let mut se = Self {
-            // stratum: StratumServer::new(stratum_conf),
             server,
             protocol,
         };

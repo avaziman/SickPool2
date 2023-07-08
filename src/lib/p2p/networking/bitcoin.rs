@@ -36,13 +36,14 @@ impl Block for bitcoin::block::Block {
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
         prev_p2p_share: U256,
     ) -> (Self, Vec<[u8; 32]>) {
+        
         let output = vout
             .map(|(script, score)| TxOut {
                 value: get_reward(score, template.coinbase_value.to_sat()),
                 script_pubkey: script.clone(),
             })
             .collect_vec();
-        // info!("Outputs: {:?}", output);
+        // println!("Outputs: {:?}", output);
 
         let height = template.height;
         let script_sig = generate_bitcoin_script(height, &prev_p2p_share.to_le_bytes());

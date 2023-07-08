@@ -3,6 +3,9 @@ use bitcoincore_rpc::bitcoin::{self};
 
 use crypto_bigint::{Encoding, U256};
 use log::{error, info, warn};
+use serde::{Deserialize, Serialize};
+use serde_hex::*;
+use serde_tuple::Deserialize_tuple;
 
 use crate::coins::coin::Coin;
 use crate::{
@@ -10,6 +13,7 @@ use crate::{
     coins::bitcoin::{Btc, MyBtcAddr},
 };
 use slab::Slab;
+use std::fmt;
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -25,7 +29,7 @@ use serde_json::{json, Value};
 use crate::{
     p2p::networking::{
         block::Block, difficulty::get_target_from_diff_units, hard_config::PPLNS_SHARE_UNITS,
-        protocol::ProtocolP2P, stratum_handler::CompleteStrartumHandler,
+        protocol::ProtocolP2P, stratum_handler::CompleteStratumHandler,
     },
     protocol::{JsonRpcProtocol, Protocol},
     server::Notifier,
@@ -41,16 +45,74 @@ use super::{
     job::JobBtc,
     job_fetcher::BlockFetcher,
     job_manager::JobManager,
-    protocol::{Discriminant, StratumRequestsBtc, StratumV1ErrorCodes, SubmitReqParams},
-    stratum::StratumProtocol,
+    protocol::StratumProtocol,
 };
 
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub enum StratumRequestsBtc {
+    Submit(SubmitReqParams),
+    Subscribe,
+    Authorize(AuthorizeReqParams),
+}
+
+#[derive(Serialize, Deserialize_tuple, PartialEq, Debug)]
+pub struct AuthorizeReqParams {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize_tuple, PartialEq, Debug)]
+pub struct SubmitReqParams {
+    pub worker_name: String,
+    #[serde(with = "SerHex::<Strict>")]
+    pub job_id: u32,
+    #[serde(with = "SerHex::<Strict>")]
+    pub extranonce2: u32,
+    #[serde(with = "SerHex::<Strict>")]
+    pub time: u32,
+    #[serde(with = "SerHex::<Strict>")]
+    pub nonce: u32,
+}
+
+#[repr(u32)]
+#[derive(Debug)]
+pub enum StratumV1ErrorCodes {
+    Unknown(String) = 20,
+    JobNotFound = 21,
+    DuplicateShare = 22,
+    LowDifficultyShare = 23,
+    UnauthorizedWorker = 24,
+    NotSubscribed = 25,
+}
+
+pub trait Discriminant {
+    fn discriminant(&self) -> u32;
+}
+
+impl Discriminant for StratumV1ErrorCodes {
+    fn discriminant(&self) -> u32 {
+        unsafe { *(self as *const Self as *const u32) }
+    }
+}
+
+impl fmt::Display for StratumV1ErrorCodes {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            StratumV1ErrorCodes::Unknown(reason) => write!(f, "{}", reason),
+            StratumV1ErrorCodes::JobNotFound => write!(f, "Job not found"),
+            StratumV1ErrorCodes::DuplicateShare => write!(f, "Duplicate share"),
+            StratumV1ErrorCodes::LowDifficultyShare => write!(f, "Low difficulty share"),
+            StratumV1ErrorCodes::UnauthorizedWorker => write!(f, "Unauthorized worker"),
+            StratumV1ErrorCodes::NotSubscribed => write!(f, "Client not subscribed"),
+        }
+    }
+}
 // original slush bitcoin stratum protocol
 pub struct StratumV1 {
     job_manager: RwLock<JobManager<JobBtc<bitcoin::Block, RpcReqBody>>>,
     client_count: AtomicU32,
     config: StratumConfig,
-    pub handler: CompleteStrartumHandler<Btc>,
+    pub handler: CompleteStratumHandler<Btc>,
     pub subscribed_clients: Mutex<Slab<Notifier>>,
     pub daemon_cli: <Btc as Coin>::Fetcher,
 }
@@ -93,17 +155,7 @@ impl StratumV1 {
                 // TODO: get address
                 let _pk = match MyBtcAddr::from_string(&params.username) {
                     Ok(k) => {
-                        // let atype = k.assume_checked().address_type();
-                        // info!("Type: {:?}", atype);
                         k
-                        // match k.require_network(Btc::NETWORK) {
-                        //     Ok(k) => k,
-                        //     Err(_) => {
-                        //         return Err(StratumV1ErrorCodes::Unknown(String::from(
-                        //             "Invalid address provided, wrong netwrok.",
-                        //         )))
-                        //     }
-                        // }
                     }
                     Err(_) => {
                         return Err(StratumV1ErrorCodes::Unknown(String::from(
@@ -304,17 +356,18 @@ impl Protocol for StratumV1 {
 
     fn new(conf: Self::Config) -> Self {
         // let p = .clone();
-
-        let daemon_cli =
-            <<Btc as Coin>::Fetcher as BlockFetcher<bitcoin::Block>>::new(conf.0.rpc_url.as_ref());
+        let (stratum_conf, p2p) = conf;
+        let daemon_cli = <<Btc as Coin>::Fetcher as BlockFetcher<bitcoin::Block>>::new(
+            stratum_conf.rpc_url.as_ref(),
+        );
 
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),
             client_count: AtomicU32::new(1),
             subscribed_clients: Mutex::new(Slab::new()),
             daemon_cli,
-            handler: CompleteStrartumHandler { p2p: conf.1 },
-            config: conf.0,
+            handler: CompleteStratumHandler { p2p },
+            config: stratum_conf,
         }
     }
 

@@ -23,7 +23,6 @@ impl BlockHeader for bitcoincore_rpc::bitcoin::block::Header {
         U256::from_le_bytes(self.block_hash().to_byte_array())
     }
 
-
     fn get_prev(&self) -> U256 {
         U256::from_le_bytes(self.prev_blockhash.to_byte_array())
     }

@@ -1,4 +1,4 @@
-use std::{path::PathBuf};
+use std::{path::PathBuf, fmt::Debug};
 
 use bitcoin::{hashes::Hash, BlockHash, ScriptBuf};
 use bitcoincore_rpc::{
@@ -17,17 +17,18 @@ pub struct BlockFetch<BlockT> {
     pub reward: u64,
 }
 
-pub trait BlockFetcher<BlockT: Block> : Send + Sync {
-    type ErrorT: std::fmt::Display;
+pub trait BlockFetcher<BlockT: Block> : Send + Sync + Debug {
+    type ErrorT: std::fmt::Display + std::fmt::Debug;
     fn new(url: &str) -> Self;
     fn fetch_blocktemplate(
         &self,
-        vout: impl Iterator<Item = (ScriptBuf, u64)>,
+        vout: impl Iterator<Item = (BlockT::Script, u64)>,
         prev_p2p_share: U256,
     ) -> Result<BlockFetch<BlockT>, Self::ErrorT>;
     fn submit_block(&self, block: &BlockT) -> Result<(), bitcoincore_rpc::Error>;
 
     fn fetch_block(&self, hash: &U256) -> Result<BlockT, bitcoincore_rpc::Error>;
+    fn get_best_blockhash(&self) -> Result<U256, bitcoincore_rpc::Error>;
 }
 
 impl BlockFetcher<bitcoin::Block> for bitcoincore_rpc::Client
@@ -74,5 +75,9 @@ where
 
     fn submit_block(&self, block: &bitcoin::Block) -> Result<(), bitcoincore_rpc::Error> {
         RpcApi::submit_block(self, &block)
+    }
+
+    fn get_best_blockhash(&self) -> Result<U256, bitcoincore_rpc::Error> {
+        Ok(U256::from_be_bytes(RpcApi::get_best_block_hash(self)?.to_byte_array()))
     }
 }

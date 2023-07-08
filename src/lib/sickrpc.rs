@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::stratum::protocol::Discriminant;
+use crate::stratum::stratum_v1::Discriminant;
+
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct RpcRequest {

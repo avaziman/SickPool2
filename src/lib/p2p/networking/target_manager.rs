@@ -27,7 +27,7 @@ pub struct TargetManager {
 // start each pool difficulty with the genesis block difficulty
 // TODO: save pool start time and block maybe
 impl TargetManager {
-    pub fn new<C: Coin>(genesis_block: C::BlockT, target_time: Duration, diff_adjust: u32) -> Self {
+    pub fn new<C: Coin>(genesis_block: &C::BlockT, target_time: Duration, diff_adjust: u32) -> Self {
         // let target = genesis_block.get_header().get_target();
         let target = MAX_TARGET;
 

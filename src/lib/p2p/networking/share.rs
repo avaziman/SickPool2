@@ -23,20 +23,20 @@ pub struct CoinabaseEncodedP2P {
     pub prev_hash: U256,
 }
 
-impl<C: Coin> ShareP2P<C> {
-    pub fn from_genesis_block(block: C::BlockT) -> Self {
-        Self {
-            encoded: CoinabaseEncodedP2P {
-                prev_hash: U256::ZERO,
-            },
-            score_changes: ScoreChanges {
-                added: Vec::from([(
-                    C::Address::from_string(C::DONATION_ADDRESS).expect("INVALID DEV ADDRESS"),
-                    PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
-                )]),
-                removed: Vec::new(),
-            },
-            block,
-        }
-    }
-}
+// impl<C: Coin> ShareP2P<C> {
+//     pub fn from_genesis_block(block: C::BlockT) -> Self {
+//         Self {
+//             encoded: CoinabaseEncodedP2P {
+//                 prev_hash: U256::ZERO,
+//             },
+//             score_changes: ScoreChanges {
+//                 added: Vec::from([(
+//                     C::Address::from_string(C::DONATION_ADDRESS).expect("INVALID DEV ADDRESS"),
+//                     PPLNS_SHARE_UNITS * PPLNS_DIFF_MULTIPLIER,
+//                 )]),
+//                 removed: Vec::new(),
+//             },
+//             block,
+//         }
+//     }
+// }

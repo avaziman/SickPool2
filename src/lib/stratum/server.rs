@@ -9,7 +9,7 @@ use crate::protocol::Protocol;
 
 use crate::{server::Server};
 
-use super::stratum::StratumProtocol;
+use super::protocol::StratumProtocol;
 use super::{config::StratumConfig};
 
 pub struct StratumServer<T: StratumProtocol> {
@@ -28,10 +28,10 @@ where
         thread::spawn(move || {
             let protocol = protocol_poll_cp;
             loop {
-                thread::sleep(job_poll_interval);
-                // info!("Polling job...");
-
                 protocol.fetch_new_job();
+                // info!("Polling job...");
+                
+                thread::sleep(job_poll_interval);
             }
         });
 

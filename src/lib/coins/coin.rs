@@ -12,10 +12,10 @@ use crate::{
 pub trait Coin : Clone + Debug + PartialEq {
     type BlockT: Block;
     type Address: Address<FromScript = <Self::BlockT as Block>::Script>;
-    type Fetcher: BlockFetcher<Self::BlockT>;
+    type Fetcher: BlockFetcher<Self::BlockT> + Debug;
     const DONATION_ADDRESS: &'static str;
     const NAME: &'static str;
     const ATOMIC_UNITS: u64;
     const DIFF1: U256;
-    fn main_config_p2p() -> ProtocolServerConfig<ConfigP2P>;
+    fn main_config_p2p() -> ProtocolServerConfig<ConfigP2P<Self::BlockT>>;
 }

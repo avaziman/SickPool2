@@ -31,7 +31,7 @@ pub trait Block:
         prev_p2p_share: U256,
     ) -> (Self, Vec<[u8; 32]>);
     fn deserialize_rewards(&self) -> Vec<(Self::Script, u64)>;
-
+        
     fn deserialize_p2p_encoded(&self) -> Result<CoinabaseEncodedP2P, EncodeErrorP2P>;
     fn verify_main_consensus(&self, height: u32) -> bool;
 

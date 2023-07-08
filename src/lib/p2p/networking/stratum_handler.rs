@@ -64,11 +64,12 @@ impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
     }
 }
 
-pub struct CompleteStrartumHandler<C: Coin> {
+// todo add notifier
+pub struct CompleteStratumHandler<C: Coin> {
     pub p2p: Arc<ProtocolP2P<C>>,
 }
 
-impl<C: Coin> StratumHandler<C> for CompleteStrartumHandler<C> {
+impl<C: Coin> StratumHandler<C> for CompleteStratumHandler<C> {
     fn on_valid_share(
         &self,
         address: &C::Address,

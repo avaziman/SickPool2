@@ -1,4 +1,4 @@
-use crypto_bigint::{ NonZero, U256, U512};
+use crypto_bigint::{CheckedMul, NonZero, U256, U512};
 
 use super::{
     hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS, PPLNS_SHARE_UNITS_256},
@@ -30,9 +30,10 @@ pub fn get_diff_score(hash: &U256, diff1: &U256) -> Score {
 
 pub fn get_target_from_diff_units(diff: u64, diff1: &U256) -> U256 {
     diff1
-        .checked_div(&U256::from_u64(diff))
+        // .checked_mul(&PPLNS_SHARE_UNITS_256)
+        // .unwrap()
+        .checked_mul(&U256::from_u64(diff))
         .unwrap()
-        .saturating_mul(&PPLNS_SHARE_UNITS_256)
 }
 
 #[cfg(test)]

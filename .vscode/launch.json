@@ -33,6 +33,31 @@
             },
             "args": [],
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'SickPool2' createpool",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=sickpool2",
+                ],
+                "filter": {
+                    "name": "sickpool2",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "create-pool",
+                "--diff1",
+                "1",
+                "--block-time-ms",
+                "1",
+                "--diff-adjust-blocks",
+                "1"
+            ],
+            "cwd": "${workspaceFolder}"
         }
     ]
 }
