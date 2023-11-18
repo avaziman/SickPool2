@@ -9,7 +9,7 @@ use crate::{
     stratum::header::BlockHeader,
 };
 
-use super::block::Block;
+use super::{block::Block, config::ConsensusConfigP2P};
 
 struct Adjustment {
     time: u32,
@@ -27,19 +27,19 @@ pub struct TargetManager {
 // start each pool difficulty with the genesis block difficulty
 // TODO: save pool start time and block maybe
 impl TargetManager {
-    pub fn new<C: Coin>(genesis_block: &C::BlockT, target_time: Duration, diff_adjust: u32) -> Self {
+    pub fn new<C: Coin>(config: &ConsensusConfigP2P<C::BlockT>, target_time: Duration, diff_adjust: u32) -> Self {
         // let target = genesis_block.get_header().get_target();
-        let target = MAX_TARGET;
+        let target = config.target_1;
 
         info!("Initial p2p target: {}, difficulty: ", target);
 
         info!("MAX TARGET: {}", MAX_TARGET);
 
-        assert!(&target >= &MAX_TARGET);
+        assert!(&target <= &MAX_TARGET);
 
         Self {
             last_adjustment: Adjustment {
-                time: genesis_block.get_header().get_time(),
+                time: config.genesis_share.get_header().get_time(),
                 target,
                 height: 0,
             },

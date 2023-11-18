@@ -1,8 +1,0 @@
-{
-  "address": "127.0.0.1:8001",
-  "rpc_url": "",
-  "job_poll_interval": {
-    "secs": 5,
-    "nanos": 0
-  }
-}

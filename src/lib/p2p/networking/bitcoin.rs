@@ -36,10 +36,12 @@ impl Block for bitcoin::block::Block {
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
         prev_p2p_share: U256,
     ) -> (Self, Vec<[u8; 32]>) {
-        
         let output = vout
             .map(|(script, score)| TxOut {
-                value: get_reward(score, template.coinbase_value.to_sat()),
+                value: bitcoin::Amount::from_sat(get_reward(
+                    score,
+                    template.coinbase_value.to_sat(),
+                )),
                 script_pubkey: script.clone(),
             })
             .collect_vec();
@@ -49,11 +51,11 @@ impl Block for bitcoin::block::Block {
         let script_sig = generate_bitcoin_script(height, &prev_p2p_share.to_le_bytes());
 
         let coinbase_tx = Transaction {
-            version: 2,
+            version: bitcoin::transaction::Version(2),
             lock_time: LockTime::ZERO,
             input: Vec::from([TxIn {
                 previous_output: OutPoint::null(),
-                sequence: Sequence::max_value(),
+                sequence: Sequence::MAX,
                 witness: Witness::new(),
                 script_sig,
             }]),
@@ -135,7 +137,7 @@ impl Block for bitcoin::block::Block {
         let mut res = Vec::with_capacity(gen_outs.len());
 
         for out in gen_outs {
-            let val = out.value;
+            let val = out.value.to_sat();
             res.push((out.script_pubkey.clone(), val));
         }
 
@@ -165,7 +167,7 @@ impl Block for bitcoin::block::Block {
     }
 
     fn get_coinbase_outs(&self) -> u64 {
-        self.txdata[0].output.iter().map(|x| x.value).sum()
+        self.txdata[0].output.iter().map(|x| x.value.to_sat()).sum()
     }
 }
 
@@ -197,7 +199,7 @@ pub mod tests {
             block::Block,
             block_manager::{BlockManager, ProcessedShare},
             pplns::{ScoreChanges, WindowPPLNS},
-            protocol::{CoinabaseEncodedP2P, ShareP2P},
+            ::{CoinabaseEncodedP2P, ShareP2P},
             target_manager::TargetManager,
         },
         stratum::header::BlockHeader,
@@ -209,9 +211,10 @@ pub mod tests {
 
     #[test]
     fn process_first_share_p2p() {
-        let candidate: bitcoin::Block =
-            serde_json::from_str(&fs::read_to_string("tests/sample_first_share.json").unwrap())
-                .unwrap();
+        let candidate: bitcoin::Block = serde_json::from_str(&include_str!(
+            "../../../../test_data/sample_first_share.json"
+        ))
+        .unwrap();
         // hash is 00000039B7B1072EAA7DCB04206600A4FA032DEB13996911679D3AE17F8C395A
         // target of regtest genesis is: 7fffff0000000000000000000000000000000000000000000000000000000000
         // mill diff is 37206769 //.49451279
@@ -219,7 +222,7 @@ pub mod tests {
         let genesis_block = bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Regtest);
         let genesis_share = ShareP2P::from_genesis_block(genesis_block.clone());
 
-        let target_man = TargetManager::new::<Btc>(genesis_block, Duration::from_secs(1), 10);
+        let target_man = TargetManager::new::<Btc>(genesis_share, Duration::from_secs(1), 10);
         let block_manager = BlockManager::new(
             genesis_share.clone(),
             PathBuf::from("tests/").into_boxed_path(),

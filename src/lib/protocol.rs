@@ -16,9 +16,9 @@ use crate::{
 
 // multithreaded
 pub trait Protocol : Send + Sync {
+    type Config ;
     type Request: std::fmt::Debug;
     type Response;
-    type Config;
     type ClientContext: std::fmt::Debug + Sync + Send + 'static;
     type ProcessingContext;
 

@@ -3,8 +3,8 @@ pub mod tests {
 
 
     use crate::protocol::JsonRpcProtocol;
-    use crate::stratum::protocol::AuthorizeReqParams;
-    use crate::stratum::protocol::{StratumRequestsBtc, SubmitReqParams};
+    use crate::stratum::stratum_v1::AuthorizeReqParams;
+    use crate::stratum::stratum_v1::{StratumRequestsBtc, SubmitReqParams};
     use crate::stratum::stratum_v1::StratumV1;
 
     #[test]

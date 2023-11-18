@@ -3,12 +3,9 @@ use crypto_bigint::U256;
 pub const CURRENT_VERSION: u32 = 1;
 pub const OLDEST_COMPATIBLE_VERSION: u32 = 1;
 
-pub const DEFAULT_P2P_PORT: u16 = 9001;
-pub const DEFAULT_STRATUM_PORT: u16 = 8001;
-
 pub const DEFAULT_STRATUM_CREATE_POOL_PORT: u16 = 9999;
 
-// one share is this many share units (sui) :)
+// one share is this many share units (SUI) :)
 // this is the lowest payout value: coin / units
 const PAYOUT_DECIMAL_PERCISION: u32 = 6;
 pub const PPLNS_SHARE_UNITS: u64 = 10u64.pow(PAYOUT_DECIMAL_PERCISION);

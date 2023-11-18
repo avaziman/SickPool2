@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 
 
@@ -21,9 +22,10 @@ where
     T: StratumProtocol + Send + Sync + 'static + Protocol<Request = Vec<u8>, Response = Vec<u8>>,
 {
     pub fn new(conf: ProtocolServerConfig<StratumConfig>, p2p: Arc<ProtocolP2P<T::Coin>>) -> Self {
-        let job_poll_interval = conf.protocol_config.job_poll_interval;
+        let job_poll_interval = conf.protocol_config.job_poll_interval_ms;
         let protocol = Arc::new(T::new((conf.protocol_config, p2p)));
 
+        let job_poll_interval = Duration::from_millis(job_poll_interval);
         let protocol_poll_cp = protocol.clone();
         thread::spawn(move || {
             let protocol = protocol_poll_cp;

@@ -17,9 +17,9 @@ pub struct BlockFetch<BlockT> {
     pub reward: u64,
 }
 
-pub trait BlockFetcher<BlockT: Block> : Send + Sync + Debug {
-    type ErrorT: std::fmt::Display + std::fmt::Debug;
-    fn new(url: &str) -> Self;
+pub trait BlockFetcher<BlockT: Block> : Send + Sync + Debug + Sized{
+    type ErrorT: std::fmt::Display + std::fmt::Debug + Sized;
+    fn new(url: &str) -> Result<Self, Self::ErrorT>;
     fn fetch_blocktemplate(
         &self,
         vout: impl Iterator<Item = (BlockT::Script, u64)>,
@@ -37,12 +37,11 @@ where
 {
     type ErrorT = bitcoincore_rpc::Error;
 
-    fn new(url: &str) -> Self {
+    fn new(url: &str) -> Result<Self, Self::ErrorT> {
         Self::new(
             url,
-            Auth::CookieFile(PathBuf::from("/home/sickguy/.bitcoin/regtest/.cookie")),
+            Auth::CookieFile("/home/sickguy/.bitcoin/regtest/regtest/.cookie".into()),
         )
-        .unwrap()
     }
 
     fn fetch_blocktemplate(

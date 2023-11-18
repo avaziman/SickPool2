@@ -18,6 +18,9 @@ impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
     ) {
         let lock = self.target_manager.lock().unwrap();
         let target = lock.target();
+        log::info!("Hash {:x}", hash);
+        log::info!("Target {:x}", target);
+
         if &hash > target {
             return;
         }

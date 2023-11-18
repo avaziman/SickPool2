@@ -2,7 +2,7 @@ use crypto_bigint::U256;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use sickpool2lib::{
-    p2p::networking::difficulty::{get_diff_score},
+    p2p::networking::difficulty::get_diff_score,
     protocol::JsonRpcProtocol,
     stratum::stratum_v1::StratumV1, coins::{bitcoin::Btc, coin::Coin},
 };

@@ -50,8 +50,10 @@
             },
             "args": [
                 "create-pool",
+                "--name",
+                "debug",
                 "--diff1",
-                "1",
+                "1000",
                 "--block-time-ms",
                 "1",
                 "--diff-adjust-blocks",

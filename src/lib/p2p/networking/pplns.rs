@@ -130,7 +130,7 @@ impl<C: Coin> WindowPPLNS<C> {
         self.add_entry(entry);
 
         // clean expired pplns...
-        // pplns window must always be full.
+    // pplns window must always be full.
         loop {
             let entry = self.pplns_window.pop_back().unwrap();
 

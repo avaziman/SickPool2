@@ -18,8 +18,8 @@ use crate::config::ServerConfig;
 use crate::protocol::Protocol;
 type Slab<T> = slab::Slab<T>;
 
-const SERVER_TOKEN: Token = Token(usize::MAX);
 // const TIMEOUT_SEC: u64 = 5;
+const SERVER_TOKEN: Token = Token(usize::MAX);
 const TIMEOUT_SEC: u64 = 1;
 const BUFF_CAPACITY: usize = 16 * 1024;
 const INITIAL_CLIENTS_CAPACITY: usize = 1024;
@@ -69,7 +69,6 @@ impl Notifier {
     }
 }
 
-// all pools are edge triggered
 impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static> Server<P> {
     pub fn new(conf: ServerConfig, protocol: Arc<P>) -> Server<P> {
         let mut listener = TcpListener::bind(conf.address).unwrap();
@@ -97,11 +96,11 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                         Arc<Mutex<P::ClientContext>>,
                     ) = rx.recv().unwrap();
 
-                    let _now = Instant::now();
+                    let now = Instant::now();
 
-                    let stratum_resp = protocol.process_request(req, ctx, &mut ptx);
+                    let protocol_resp = protocol.process_request(req, ctx, &mut ptx);
 
-                    respond(writer.as_ref(), stratum_resp.as_ref());
+                    respond(writer.as_ref(), protocol_resp.as_ref());
                     // let elapsed = now.elapsed().as_micros();
                     // info!(
                     //     "Processed response: {:?}, in {}us",
@@ -116,7 +115,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
             listener,
             protocol,
             token: SERVER_TOKEN,
-            poll: poll,
+            poll,
             connections: Slab::with_capacity(INITIAL_CLIENTS_CAPACITY),
             conf,
             tx,

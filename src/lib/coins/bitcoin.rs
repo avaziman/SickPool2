@@ -12,7 +12,6 @@ use crate::{
     p2p::networking::{
         block::Block,
         config::{ConfigP2P, ConsensusConfigP2P},
-        hard_config::DEFAULT_STRATUM_PORT,
     },
     stratum::header::BlockHeader,
 };
@@ -37,24 +36,19 @@ impl Coin for Btc {
     const DIFF1: U256 =
         U256::from_be_hex("00000000FFFF0000000000000000000000000000000000000000000000000000");
 
-    fn main_config_p2p() -> ProtocolServerConfig<ConfigP2P<Self::BlockT>> {
-        ProtocolServerConfig {
-            protocol_config: ConfigP2P {
-                consensus: ConsensusConfigP2P {
-                    parent_pool_id: U256::ZERO,
-                    block_time: Duration::from_secs(10),
-                    diff_adjust_blocks: 16,
-                    genesis_share: bitcoin::blockdata::constants::genesis_block(Network::Bitcoin),
-                    password: None,
-                    target_1: Self::DIFF1,
-                },
-                peer_connections: 32,
-                rpc_url: String::from(""),
-            },
-            server_config: ServerConfig {
-                address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_STRATUM_PORT),
-                processing_threads: 2,
-            },
+    const DEFAULT_DAEMON_PORT: u16 = 8332;
+
+    fn main_pool_consensus_config() -> ConsensusConfigP2P<Self::BlockT> {
+        ConsensusConfigP2P {
+            parent_pool_id: U256::ZERO,
+            block_time_ms: Duration::from_secs(10).as_millis() as u64,
+            diff_adjust_blocks: 16,
+            genesis_share: bitcoin::blockdata::constants::genesis_block(Network::Bitcoin),
+            password: None,
+            target_1: Self::DIFF1,
+            name: String::from("main"),
+            default_port_p2p: Self::DEFAULT_P2P_PORT,
+            default_port_stratum: Self::DEFAULT_STRATUM_PORT,
         }
     }
 }

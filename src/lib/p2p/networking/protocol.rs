@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -31,7 +31,7 @@ use super::{
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
-    pplns::{WindowPPLNS, self},
+    pplns::{self, WindowPPLNS},
     target_manager::TargetManager,
     utils::time_now_ms,
 };
@@ -55,31 +55,29 @@ pub type Reward = u64;
 impl<C: Coin> Protocol for ProtocolP2P<C> {
     type Request = Vec<u8>;
     type Response = Vec<u8>;
-    type Config = (ConfigP2P<C::BlockT>, Box<Path>, u16); // data dir, listening port
+    type Config = ConfigP2P<C::BlockT>; // data dir, listening port
     type ClientContext = Peer;
     type ProcessingContext = ();
 
     fn new(conf: Self::Config) -> Self {
-        let (config_p2p, data_dir, port) = conf;
-
-        let daemon_cli = C::Fetcher::new(config_p2p.rpc_url.as_ref());
+        let daemon_cli = C::Fetcher::new(conf.rpc_url.as_ref()).unwrap();
         let genesis_share =
-            BlockManager::decode_share(config_p2p.consensus.genesis_share.clone(), &HashMap::new())
+            BlockManager::decode_share(conf.consensus.genesis_share.clone(), &HashMap::new())
                 .unwrap();
 
         Self {
             pplns_window: Mutex::new(WindowPPLNS::new(genesis_share.clone())),
-            hello_message: Messages::Hello(Hello::new(port, &config_p2p.consensus)),
+            hello_message: Messages::Hello(Hello::new(conf.listening_port, &conf.consensus)),
             target_manager: Mutex::new(TargetManager::new::<C>(
-                &genesis_share.block,
-                config_p2p.consensus.block_time,
-                config_p2p.consensus.diff_adjust_blocks,
+                &conf.consensus,
+            Duration::from_millis(conf.consensus.block_time_ms),
+                conf.consensus.diff_adjust_blocks,
             )),
-            block_manager: BlockManager::new(genesis_share, data_dir.clone()),
+            block_manager: BlockManager::new(genesis_share, conf.data_dir.clone()),
             peers: Mutex::new(HashMap::new()),
-            conf: config_p2p,
-            peer_manager: PeerManager::new(data_dir.clone()),
+            peer_manager: PeerManager::new(conf.data_dir.clone()),
             daemon_cli,
+            conf,
         }
     }
 
@@ -113,7 +111,7 @@ impl<C: Coin> Protocol for ProtocolP2P<C> {
         let peer_lock = self.peers.lock().unwrap();
         let connection_count = peer_lock.len() as u32;
 
-        if connection_count >= self.conf.peer_connections {
+        if connection_count >= self.conf.max_peer_connections {
             None
         } else {
             // peer_lock.insert(token, notifier);
@@ -143,11 +141,13 @@ impl<C: Coin> Protocol for ProtocolP2P<C> {
 
 impl<C: Coin> ProtocolP2P<C> {
     pub fn get_new_pool_config(
+        data_dir: Box<Path>,
+        pool_name: String,
         rpc_url: String,
         diff1: u64,
         block_time_ms: u64,
     ) -> ConfigP2P<C::BlockT> {
-        let daemon_cli = C::Fetcher::new(rpc_url.as_ref());
+        let daemon_cli = C::Fetcher::new(rpc_url.as_ref()).unwrap();
 
         let rewards = [(
             C::Address::from_string(DEV_ADDRESS_BTC_STR)
@@ -163,16 +163,21 @@ impl<C: Coin> ProtocolP2P<C> {
             .block;
 
         ConfigP2P {
-            peer_connections: 32,
+            max_peer_connections: 32,
             consensus: ConsensusConfigP2P {
+                name: pool_name,
                 parent_pool_id: U256::ZERO,
-                block_time: Duration::from_millis(block_time_ms),
+                block_time_ms,
                 diff_adjust_blocks: 16,
                 genesis_share: block,
                 password: None,
                 target_1: difficulty::get_target_from_diff_units(diff1, &C::DIFF1),
+                default_port_p2p: 0,
+                default_port_stratum: 0,
             },
             rpc_url,
+            data_dir,
+            listening_port: 0,
         }
     }
 

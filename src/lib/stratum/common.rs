@@ -39,8 +39,7 @@ where
 
             client.submitted_shares.insert(low);
 
-            // info!("Hash {:x}", hash);
-            // info!("Target {:x}", client.target);
+            // log::info!("Hash {:x}", hash);
 
             if hash <= job.target {
                 ShareResult::Block(hash)

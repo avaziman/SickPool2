@@ -51,7 +51,7 @@ impl<C: Coin> BlockManager<C> {
 
         let blocks_dir = data_dir.into_boxed_path();
 
-        if let Err(e) = fs::create_dir(&blocks_dir) {
+        if let Err(e) = fs::create_dir_all(&blocks_dir) {
             if e.kind() != std::io::ErrorKind::AlreadyExists {
                 panic!("Failed to create blocks dir: {e}");
             }
@@ -118,6 +118,7 @@ impl<C: Coin> BlockManager<C> {
         let share: ShareP2P<C> = Self::decode_share(block, &window.address_scores)?;
 
         let main_hash = self.main_tip.lock().unwrap().hash;
+
         // check mainnet link
         if share.block.get_header().get_prev() != main_hash {
             info!("GIVEN PREV: {}", share.block.get_header().get_prev());
@@ -143,7 +144,7 @@ impl<C: Coin> BlockManager<C> {
         // share score is: share_diff / target_diff
         let score = get_diff_score(&hash, &share.block.get_header().get_target());
         // println!("Share score: {}", score);
-        // println!("HASH: {}", hash);
+        // info!("HASH: {}", hash);
 
         if window.verify_changes(&share.score_changes, score) {
             warn!("Score changes are unbalanced...");

@@ -154,9 +154,7 @@ impl StratumV1 {
             StratumRequestsBtc::Authorize(params) => {
                 // TODO: get address
                 let _pk = match MyBtcAddr::from_string(&params.username) {
-                    Ok(k) => {
-                        k
-                    }
+                    Ok(k) => k,
                     Err(_) => {
                         return Err(StratumV1ErrorCodes::Unknown(String::from(
                             "Invalid address provided",
@@ -214,7 +212,7 @@ impl StratumV1 {
 
         match res {
             ShareResult::Block(diff) => {
-                info!("Found block!");
+                info!("Found block! {}", diff);
                 let job = job.unwrap();
                 if let Err(e) = self.daemon_cli.submit_block(&job.block) {
                     error!("Failed to submit block: {}", e);
@@ -359,7 +357,7 @@ impl Protocol for StratumV1 {
         let (stratum_conf, p2p) = conf;
         let daemon_cli = <<Btc as Coin>::Fetcher as BlockFetcher<bitcoin::Block>>::new(
             stratum_conf.rpc_url.as_ref(),
-        );
+        ).unwrap();
 
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),

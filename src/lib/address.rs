@@ -1,13 +1,9 @@
-use bitcoin::{address::NetworkUnchecked};
+use bitcoin::address::NetworkUnchecked;
 use std::{hash::Hash, str::FromStr};
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    coins::{
-        bitcoin::{Btc, MyBtcAddr},
-    },
-};
+use crate::coins::bitcoin::{Btc, MyBtcAddr};
 pub trait Address:
     'static
     + Eq
@@ -28,10 +24,16 @@ pub trait Address:
     fn to_script(&self) -> Self::FromScript;
 }
 
+#[derive(Debug)]
+pub enum BtcAddrError {
+    Parse(bitcoin::address::ParseError),
+    Other(bitcoin::address::Error),
+}
+
 pub struct BtcLikeAddr;
 impl Address for MyBtcAddr {
     type FromScript = bitcoin::script::ScriptBuf;
-    type Error = bitcoin::address::Error;
+    type Error = BtcAddrError;
 
     fn from_script(s: &Self::FromScript) -> Result<Self, Self::Error> {
         let inner = bitcoin::Address::from_script(&s, Btc::NETWORK)?;
@@ -44,9 +46,20 @@ impl Address for MyBtcAddr {
 
     fn from_string(s: &str) -> Result<Self, Self::Error> {
         Ok(MyBtcAddr(
-            bitcoin::Address::<NetworkUnchecked>::from_str(s)?
-                .require_network(Btc::NETWORK)?,
+            bitcoin::Address::<NetworkUnchecked>::from_str(s)?.require_network(Btc::NETWORK)?,
         ))
+    }
+}
+
+impl From<bitcoin::address::ParseError> for BtcAddrError {
+    fn from(value: bitcoin::address::ParseError) -> Self {
+        BtcAddrError::Parse(value)
+    }
+}
+
+impl From<bitcoin::address::Error> for BtcAddrError {
+    fn from(value: bitcoin::address::Error) -> Self {
+        BtcAddrError::Other(value)
     }
 }
 
