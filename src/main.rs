@@ -20,14 +20,14 @@ use sickpool2lib::stratum::header::BlockHeader;
 use sickpool2lib::stratum::server::StratumServer;
 use sickpool2lib::stratum::stratum_v1::StratumV1;
 
-use std::io::Write;
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::result::Result;
 
 use std::fs;
 use std::sync::Arc;
-use std::time::Duration;
+
 
 extern crate sickpool2lib;
 
@@ -58,10 +58,6 @@ fn read_config<T: serde::de::DeserializeOwned + serde::Serialize>(
         Ok(k) => Ok(k),
         Err(e) => Err(format!("Invalid config at: {}, {}", path.display(), e)),
     }
-}
-
-fn default_datadir() -> PathBuf {
-    PathBuf::from("datadir")
 }
 
 #[derive(Args, Clone, Debug)]
