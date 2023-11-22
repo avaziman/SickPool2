@@ -28,9 +28,8 @@ where
         let job_poll_interval = Duration::from_millis(job_poll_interval);
         let protocol_poll_cp = protocol.clone();
         thread::spawn(move || {
-            let protocol = protocol_poll_cp;
             loop {
-                protocol.fetch_new_job();
+                protocol_poll_cp.fetch_new_job();
                 // info!("Polling job...");
                 
                 thread::sleep(job_poll_interval);

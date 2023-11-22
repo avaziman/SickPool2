@@ -28,8 +28,8 @@ pub trait Coin: Clone + Debug + PartialEq {
     const ATOMIC_UNITS: u64;
     const DIFF1: U256;
     const DEFAULT_DAEMON_PORT: u16;
-    const DEFAULT_P2P_PORT: u16 = Self::DEFAULT_DAEMON_PORT + 10_000;
-    const DEFAULT_STRATUM_PORT: u16 = Self::DEFAULT_DAEMON_PORT + 20_000;
+    const DEFAULT_P2P_PORT: u16;
+    const DEFAULT_STRATUM_PORT: u16;
 
     fn main_pool_consensus_config() -> ConsensusConfigP2P<Self::BlockT>;
     fn main_pool_config(data_dir: Box<Path>) -> ProtocolServerConfig<ConfigP2P<Self::BlockT>> {

@@ -27,7 +27,7 @@ pub struct ConsensusConfigP2P<BlockT> {
     pub target_1: U256,
     pub password: Option<String>,
     // genesis pool block also gives us the main height of start
-    pub genesis_share: BlockT,
+    pub genesis_block: BlockT,
     pub diff_adjust_blocks: u32,
     pub block_time_ms: u64,
     pub default_port_p2p: u16,

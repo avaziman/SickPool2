@@ -9,8 +9,8 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 
 use std::net::{Shutdown, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::thread::{self};
+use std::time::Duration;
 
 use slab;
 
@@ -32,6 +32,7 @@ pub struct Server<P: Protocol> {
     connections: Slab<Connection<P::ClientContext>>,
     protocol: Arc<P>,
     tx: Sender<(Vec<u8>, IoArc<TcpStream>, Arc<Mutex<P::ClientContext>>)>,
+    // processing: Vec<JoinHandle<>>
 }
 
 // #[derive(Debug)]
@@ -60,8 +61,9 @@ pub fn respond(mut stream: &TcpStream, msg: &[u8]) {
     stream.flush().unwrap()
 }
 
+// pretty useless rn
 #[derive(Debug, Clone)]
-pub struct Notifier(IoArc<TcpStream>);
+pub struct Notifier(pub(crate) IoArc<TcpStream>);
 
 impl Notifier {
     pub fn notify(&self, msg: &[u8]) {
@@ -96,7 +98,7 @@ impl<P: Protocol<Request = Vec<u8>, Response = Vec<u8>> + Send + Sync + 'static>
                         Arc<Mutex<P::ClientContext>>,
                     ) = rx.recv().unwrap();
 
-                    let now = Instant::now();
+                    // let now = Instant::now();
 
                     let protocol_resp = protocol.process_request(req, ctx, &mut ptx);
 

@@ -8,6 +8,8 @@ use serde_hex::*;
 use serde_tuple::Deserialize_tuple;
 
 use crate::coins::coin::Coin;
+use crate::p2p::networking::protocol::SubmittingContext;
+use crate::p2p::networking::share::CoinbaseEncodedP2P;
 use crate::{
     address::Address,
     coins::bitcoin::{Btc, MyBtcAddr},
@@ -209,6 +211,7 @@ impl StratumV1 {
         };
 
         let res = process_share(&mut job, (params, lock.extra_nonce), &mut *lock);
+        std::mem::drop(lock);
 
         match res {
             ShareResult::Block(diff) => {
@@ -219,12 +222,14 @@ impl StratumV1 {
                 }
 
                 self.handler.on_valid_share(
+                    ctx.clone(),
                     &MyBtcAddr::from_string(&address).unwrap(),
                     &job.block,
                     diff,
                 )
             }
             ShareResult::Valid(diff) => self.handler.on_valid_share(
+                ctx.clone(),
                 &MyBtcAddr::from_string(&address).unwrap(),
                 &job.unwrap().block,
                 diff,
@@ -272,13 +277,14 @@ impl StratumProtocol for StratumV1 {
                 .address_scores
                 .iter()
                 .map(|(addr, score)| (addr.to_script(), *score)),
-            self.handler
-                .p2p
-                .block_manager
-                .p2p_tip()
-                .block
-                .get_header()
-                .get_hash(),
+            {
+                let tip = self.handler.p2p.block_manager.p2p_tip();
+                CoinbaseEncodedP2P {
+                    prev_hash: tip.hash,
+                    height: tip.inner.encoded.height + 1,
+                    round_num: self.handler.p2p.block_manager.round_num(),
+                }
+            },
         );
 
         if let Ok(job) = res {
@@ -357,7 +363,8 @@ impl Protocol for StratumV1 {
         let (stratum_conf, p2p) = conf;
         let daemon_cli = <<Btc as Coin>::Fetcher as BlockFetcher<bitcoin::Block>>::new(
             stratum_conf.rpc_url.as_ref(),
-        ).unwrap();
+        )
+        .unwrap();
 
         StratumV1 {
             job_manager: RwLock::new(JobManager::new(&daemon_cli)),
@@ -387,10 +394,10 @@ impl Protocol for StratumV1 {
         }
     }
 
-    fn create_client(&self, _addr: SocketAddr, notifier: Notifier) -> Option<Self::ClientContext> {
+    fn create_client(&self, addr: SocketAddr, notifier: Notifier) -> Option<Self::ClientContext> {
         let id = self.client_count.load(Ordering::Relaxed);
         self.client_count.store(id + 1, Ordering::Relaxed);
-        Some(StratumClient::new(notifier, id))
+        Some(StratumClient::new(notifier, id, addr))
     }
 
     fn delete_client(&self, ctx: Arc<Mutex<Self::ClientContext>>) {

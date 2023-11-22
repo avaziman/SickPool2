@@ -39,7 +39,7 @@ impl TargetManager {
 
         Self {
             last_adjustment: Adjustment {
-                time: config.genesis_share.get_header().get_time(),
+                time: config.genesis_block.get_header().get_time(),
                 target,
                 height: 0,
             },

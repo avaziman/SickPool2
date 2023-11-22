@@ -15,7 +15,7 @@ pub enum EncodeErrorP2P {
 }
 use std::hash::Hash;
 
-use super::share::CoinabaseEncodedP2P;
+use super::share::CoinbaseEncodedP2P;
 pub trait Block:
     Clone + PartialEq + std::fmt::Debug + Serialize + DeserializeOwned + Send + Sync
 {
@@ -28,11 +28,11 @@ pub trait Block:
     fn from_block_template(
         template: &Self::BlockTemplateT,
         vout: impl Iterator<Item = (Self::Script, u64)>,
-        prev_p2p_share: U256,
+        cb_encoded: CoinbaseEncodedP2P,
     ) -> (Self, Vec<[u8; 32]>);
     fn deserialize_rewards(&self) -> Vec<(Self::Script, u64)>;
         
-    fn deserialize_p2p_encoded(&self) -> Result<CoinabaseEncodedP2P, EncodeErrorP2P>;
+    fn deserialize_p2p_encoded(&self) -> Result<CoinbaseEncodedP2P, EncodeErrorP2P>;
     fn verify_main_consensus(&self, height: u32) -> bool;
 
     fn get_coinbase_outs(&self) -> u64;

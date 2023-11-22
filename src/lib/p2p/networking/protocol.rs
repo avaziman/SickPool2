@@ -17,21 +17,20 @@ use crate::{
     address::Address,
     protocol::Protocol,
     server::{respond, Notifier},
-    stratum::job_fetcher::BlockFetcher,
+    stratum::{client::StratumClient, job_fetcher::BlockFetcher},
 };
 
 use super::{
+    block::Block,
     block_manager::BlockManager,
     config::{ConfigP2P, ConsensusConfigP2P},
     difficulty,
-    hard_config::{
-        CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION, PPLNS_DIFF_MULTIPLIER,
-        PPLNS_SHARE_UNITS,
-    },
+    hard_config::{CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION},
     messages::*,
     peer::Peer,
     peer_manager::PeerManager,
-    pplns::{self, WindowPPLNS},
+    pplns::{self, ScoreChanges, WindowPPLNS},
+    share::{CoinbaseEncodedP2P, ShareP2P},
     target_manager::TargetManager,
     utils::time_now_ms,
 };
@@ -61,16 +60,22 @@ impl<C: Coin> Protocol for ProtocolP2P<C> {
 
     fn new(conf: Self::Config) -> Self {
         let daemon_cli = C::Fetcher::new(conf.rpc_url.as_ref()).unwrap();
-        let genesis_share =
-            BlockManager::decode_share(conf.consensus.genesis_share.clone(), &HashMap::new())
-                .unwrap();
+
+        // only share that's not actually encoded in the blockchain (as it would require much resources)
+        let genesis_share = ShareP2P {
+            block: conf.consensus.genesis_block.clone(),
+            encoded: CoinbaseEncodedP2P::default(),
+            score_changes: ScoreChanges::genesis(),
+        };
+        // BlockManager::decode_share(conf.consensus.genesis_block.clone(), &HashMap::new())
+        //     .unwrap();
 
         Self {
             pplns_window: Mutex::new(WindowPPLNS::new(genesis_share.clone())),
             hello_message: Messages::Hello(Hello::new(conf.listening_port, &conf.consensus)),
             target_manager: Mutex::new(TargetManager::new::<C>(
                 &conf.consensus,
-            Duration::from_millis(conf.consensus.block_time_ms),
+                Duration::from_millis(conf.consensus.block_time_ms),
                 conf.consensus.diff_adjust_blocks,
             )),
             block_manager: BlockManager::new(genesis_share, conf.data_dir.clone()),
@@ -149,7 +154,7 @@ impl<C: Coin> ProtocolP2P<C> {
     ) -> ConfigP2P<C::BlockT> {
         let daemon_cli = C::Fetcher::new(rpc_url.as_ref()).unwrap();
 
-        let rewards = [(
+        let rewards: [(<<C as Coin>::BlockT as Block>::Script, u64); 1] = [(
             C::Address::from_string(DEV_ADDRESS_BTC_STR)
                 .unwrap()
                 .to_script(),
@@ -157,7 +162,7 @@ impl<C: Coin> ProtocolP2P<C> {
         )];
 
         let block = daemon_cli
-            .fetch_blocktemplate(rewards.into_iter(), U256::ZERO)
+            .fetch_blocktemplate(rewards.into_iter(), CoinbaseEncodedP2P::default())
             .unwrap()
             // .expect("Failed to get block")
             .block;
@@ -169,7 +174,7 @@ impl<C: Coin> ProtocolP2P<C> {
                 parent_pool_id: U256::ZERO,
                 block_time_ms,
                 diff_adjust_blocks: 16,
-                genesis_share: block,
+                genesis_block: block,
                 password: None,
                 target_1: difficulty::get_target_from_diff_units(diff1, &C::DIFF1),
                 default_port_p2p: 0,
@@ -195,11 +200,26 @@ impl<C: Coin> ProtocolP2P<C> {
         match message {
             Messages::Hello(hello) => self.handle_hello(hello, ctx),
             Messages::VerAck => self.handle_ver_ack(ctx),
-            Messages::GetShares => self.handle_get_shares(),
+            Messages::GetShares { from_height, count } => {
+                self.handle_get_shares(from_height, count)
+            }
             Messages::Shares(_shares) => todo!(),
-            Messages::ShareSubmit(share) => self.handle_share_submit(ctx, share),
-            Messages::Reject => todo!(),
+            Messages::ShareSubmit(share) => {
+                self.handle_share_submit(SubmittingContext::P2P(ctx.lock().unwrap().address), share)
+            }
+            Messages::Reject => {
+                warn!("Peer rejected");
+                None
+            }
             Messages::CreatePool(_) => todo!(),
+            Messages::GetRoundInfo => Some(Messages::RoundInfo {
+                start_height: self.block_manager.round_start_height(),
+                current_height: self.block_manager.p2p_tip().inner.encoded.height,
+            }),
+            Messages::RoundInfo {
+                start_height,
+                current_height,
+            } => todo!(),
         }
     }
 
@@ -224,9 +244,9 @@ impl<C: Coin> ProtocolP2P<C> {
         None
     }
 
-    fn handle_get_shares(&self) -> Option<Messages<C::BlockT>> {
+    fn handle_get_shares(&self, from_height: u32, count: u8) -> Option<Messages<C::BlockT>> {
         // listening port is already known as it was used to connect...
-        let shares = self.block_manager.load_shares();
+        let shares = self.block_manager.load_shares(from_height, count);
 
         match shares {
             Ok(k) => Some(Messages::Shares(k)),
@@ -234,36 +254,31 @@ impl<C: Coin> ProtocolP2P<C> {
         }
     }
 
-    fn handle_share_submit(
+    pub(crate) fn handle_share_submit(
         &self,
-        ctx: Arc<Mutex<Peer>>,
+        ctx: SubmittingContext,
         share: C::BlockT,
     ) -> Option<Messages<C::BlockT>> {
         let targetman = self.target_manager.lock().unwrap();
 
-        match self.block_manager.process_share(
-            share,
-            &targetman,
-            &self.pplns_window.lock().unwrap(),
-        ) {
+        let mut pplns_lock = self.pplns_window.lock().unwrap();
+        match self
+            .block_manager
+            .process_share(share, &targetman, &pplns_lock)
+        {
             Ok(pshare) => {
                 // check if valid mainnet block
                 // let main_target = pshare.inner.block.get_header().get_target();
 
                 info!(
-                    "Accepted new share submission from peer: {}, hash: {}",
-                    ctx.lock().unwrap().address,
-                    &pshare.hash
+                    "Accepted new share submission from peer: {:?}, hash: {}",
+                    ctx, &pshare.hash
                 );
 
-                self.pplns_window.lock().unwrap().add(pshare);
+                pplns_lock.add(pshare);
             }
             Err(e) => {
-                info!(
-                    "Rejected share from {} for {:?}",
-                    ctx.lock().unwrap().address,
-                    e
-                )
+                info!("Rejected share from {:?} for {:?}", ctx, e)
             }
         }
 
@@ -286,4 +301,10 @@ impl<C: Coin> ProtocolP2P<C> {
     pub fn peers_to_connect(&self, amount: u32) -> Vec<SocketAddr> {
         self.peer_manager.get_peers_to_connect(amount)
     }
+}
+
+#[derive(Debug)]
+pub(crate) enum SubmittingContext {
+    Stratum(SocketAddr),
+    P2P(SocketAddr),
 }

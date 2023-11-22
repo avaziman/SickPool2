@@ -1,14 +1,15 @@
-use std::{path::PathBuf, fmt::Debug};
+use std::{fmt::Debug, path::PathBuf};
 
 use bitcoin::{hashes::Hash, BlockHash, ScriptBuf};
 use bitcoincore_rpc::{
     self,
     bitcoin::{self},
-    Auth, RpcApi, bitcoincore_rpc_json::GetBlockTemplateResult,
+    bitcoincore_rpc_json::GetBlockTemplateResult,
+    Auth, RpcApi,
 };
-use crypto_bigint::{U256, Encoding};
+use crypto_bigint::{Encoding, U256};
 
-use crate::{p2p::networking::block::Block};
+use crate::p2p::networking::{block::Block, share::CoinbaseEncodedP2P};
 
 pub struct BlockFetch<BlockT> {
     pub block: BlockT,
@@ -17,13 +18,13 @@ pub struct BlockFetch<BlockT> {
     pub reward: u64,
 }
 
-pub trait BlockFetcher<BlockT: Block> : Send + Sync + Debug + Sized{
+pub trait BlockFetcher<BlockT: Block>: Send + Sync + Debug + Sized {
     type ErrorT: std::fmt::Display + std::fmt::Debug + Sized;
     fn new(url: &str) -> Result<Self, Self::ErrorT>;
     fn fetch_blocktemplate(
         &self,
         vout: impl Iterator<Item = (BlockT::Script, u64)>,
-        prev_p2p_share: U256,
+        cb_encoded: CoinbaseEncodedP2P,
     ) -> Result<BlockFetch<BlockT>, Self::ErrorT>;
     fn submit_block(&self, block: &BlockT) -> Result<(), bitcoincore_rpc::Error>;
 
@@ -47,7 +48,7 @@ where
     fn fetch_blocktemplate(
         &self,
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
-        prev_p2p_share: U256,
+        cb_encoded: CoinbaseEncodedP2P,
     ) -> Result<BlockFetch<bitcoin::Block>, bitcoincore_rpc::Error> {
         use bitcoincore_rpc::json::*;
 
@@ -58,7 +59,7 @@ where
         )?;
         let height = header.height as u32;
 
-        let (block, tx_hashes) = bitcoin::Block::from_block_template(&header, vout, prev_p2p_share);
+        let (block, tx_hashes) = bitcoin::Block::from_block_template(&header, vout, cb_encoded);
 
         Ok(BlockFetch {
             block,
@@ -77,6 +78,8 @@ where
     }
 
     fn get_best_blockhash(&self) -> Result<U256, bitcoincore_rpc::Error> {
-        Ok(U256::from_be_bytes(RpcApi::get_best_block_hash(self)?.to_byte_array()))
+        Ok(U256::from_be_bytes(
+            RpcApi::get_best_block_hash(self)?.to_byte_array(),
+        ))
     }
 }

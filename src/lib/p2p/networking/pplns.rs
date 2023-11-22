@@ -11,7 +11,7 @@ use crate::{address::Address, coins::coin::Coin};
 use super::{
     block::EncodeErrorP2P,
     block_manager::ProcessedShare,
-    hard_config::{PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
+    hard_config::{DEV_ADDRESS_BTC_STR, PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
     share::ShareP2P,
 };
 
@@ -62,6 +62,14 @@ impl<A: Address> ScoreChanges<A> {
 
         Ok(ScoreChanges { added, removed })
     }
+
+    // genesis block will give the rest of the profits to the dev addr
+    pub fn genesis() -> Self {
+        Self {
+            added: Vec::from([(A::from_string(DEV_ADDRESS_BTC_STR).unwrap(), MAX_SCORE)]),
+            removed: Vec::new(),
+        }
+    }
 }
 
 pub struct WindowPPLNS<C: Coin> {
@@ -79,7 +87,7 @@ pub struct WindowEntry<C: Coin> {
 }
 // pub static PPLNS_DIFF_MULTIPLIER_DECIMAL: Decimal =PPLNS_DIFF_MULTIPLIER.into();
 
-pub const MAX_SCORE : u64 = PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS;
+pub const MAX_SCORE: u64 = PPLNS_DIFF_MULTIPLIER * PPLNS_SHARE_UNITS;
 
 pub fn get_reward(score: Score, total_reward: u64) -> u64 {
     score * total_reward / (MAX_SCORE)
@@ -93,10 +101,7 @@ impl<C: Coin> WindowPPLNS<C> {
     pub fn new(genesis: ShareP2P<C>) -> Self {
         assert_eq!(genesis.score_changes.added.len(), 1);
         assert_eq!(genesis.score_changes.removed.len(), 0);
-        assert_eq!(
-            genesis.score_changes.added[0].1,
-            MAX_SCORE
-        );
+        assert_eq!(genesis.score_changes.added[0].1, MAX_SCORE);
 
         let genesis_entry = WindowEntry {
             share: genesis,
@@ -130,7 +135,7 @@ impl<C: Coin> WindowPPLNS<C> {
         self.add_entry(entry);
 
         // clean expired pplns...
-    // pplns window must always be full.
+        // pplns window must always be full.
         loop {
             let entry = self.pplns_window.pop_back().unwrap();
 

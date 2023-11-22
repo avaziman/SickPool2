@@ -1,20 +1,10 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::Duration,
-};
+use std::time::Duration;
 
 use bitcoin::{address::NetworkUnchecked, Network};
 use crypto_bigint::U256;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    config::{ProtocolServerConfig, ServerConfig},
-    p2p::networking::{
-        block::Block,
-        config::{ConfigP2P, ConsensusConfigP2P},
-    },
-    stratum::header::BlockHeader,
-};
+use crate::p2p::networking::config::ConsensusConfigP2P;
 
 use super::coin::Coin;
 
@@ -34,16 +24,18 @@ impl Coin for Btc {
 
     const ATOMIC_UNITS: u64 = 8;
     const DIFF1: U256 =
-        U256::from_be_hex("00000000FFFF0000000000000000000000000000000000000000000000000000");
+        U256::from_be_hex("00000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 
     const DEFAULT_DAEMON_PORT: u16 = 8332;
+    const DEFAULT_P2P_PORT: u16 = 18332;
+    const DEFAULT_STRATUM_PORT: u16 = 28332;
 
     fn main_pool_consensus_config() -> ConsensusConfigP2P<Self::BlockT> {
         ConsensusConfigP2P {
             parent_pool_id: U256::ZERO,
             block_time_ms: Duration::from_secs(10).as_millis() as u64,
             diff_adjust_blocks: 16,
-            genesis_share: bitcoin::blockdata::constants::genesis_block(Network::Bitcoin),
+            genesis_block: bitcoin::blockdata::constants::genesis_block(Network::Bitcoin),
             password: None,
             target_1: Self::DIFF1,
             name: String::from("main"),
@@ -56,6 +48,7 @@ impl Coin for Btc {
 impl Btc {
     pub const NETWORK: Network = Network::Regtest;
 }
+
 impl<'de> Deserialize<'de> for MyBtcAddr {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -69,23 +62,3 @@ impl<'de> Deserialize<'de> for MyBtcAddr {
     }
 }
 
-fn mine_genesis_share(mut genesis_block: bitcoin::Block, target_1: U256) -> bitcoin::Block {
-    loop {
-        genesis_block.header.nonce += 1;
-        let hash = genesis_block.get_header().get_hash();
-
-        if hash < target_1 {
-            return genesis_block;
-        }
-    }
-    // ConsensusConfigP2P {
-    //     parent_pool_id: U256::ZERO,
-    //     block_time: Duration::from_secs(10),
-    //     diff_adjust_blocks: 16,
-    //     genesis_share: U256::from_be_hex(
-    //         "3a052ae3c5e1684d6648b2674ccf26f65d27f489f536a015146e986ee45ffbf6",
-    //     ),
-    //     password: None,
-    //     target_1: Self::DIFF1,
-    // };
-}

@@ -1,17 +1,19 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crypto_bigint::U256;
 use log::{error, info};
 
-use super::{protocol::ProtocolP2P};
+use super::protocol::ProtocolP2P;
 use crate::{
     coins::coin::Coin,
-    stratum::{handler::StratumHandler},
+    p2p::networking::protocol::SubmittingContext,
+    stratum::{client::StratumClient, handler::StratumHandler},
 };
 
 impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
     fn on_valid_share(
         &self,
+        ctx: Arc<Mutex<StratumClient>>,
         _address: &C::Address,
         block: &C::BlockT,
         hash: U256,
@@ -24,25 +26,14 @@ impl<C: Coin> StratumHandler<C> for ProtocolP2P<C> {
         if &hash > target {
             return;
         }
+        std::mem::drop(lock);
 
-        let mut window_lock = self.pplns_window.lock().unwrap();
-        match self.block_manager.process_share(
+        info!("LOCAL FOUND new share submission hash: {}", &hash);
+
+        self.handle_share_submit(
+            SubmittingContext::Stratum(ctx.lock().unwrap().address),
             block.clone(),
-            &lock,
-            &window_lock,
-        ) {
-            Ok(valid_p2p_share) => {
-                info!(
-                    "LOCAL FOUND new share submission hash: {}",
-                    &valid_p2p_share.hash
-                );
-
-                window_lock.add(valid_p2p_share);
-            }
-            Err(e) => {
-                error!("LOCAL P2P share rejected for: {:?}", e);
-            }
-        }
+        );
     }
 
     fn on_new_block(&self, height: u32, block_hash: &U256) {
@@ -75,18 +66,15 @@ pub struct CompleteStratumHandler<C: Coin> {
 impl<C: Coin> StratumHandler<C> for CompleteStratumHandler<C> {
     fn on_valid_share(
         &self,
+        ctx: Arc<Mutex<StratumClient>>,
         address: &C::Address,
         share: &C::BlockT,
         hash: U256,
     ) {
-        self.p2p.on_valid_share(address, share, hash)
+        self.p2p.on_valid_share(ctx, address, share, hash)
     }
 
-    fn on_new_block(
-        &self,
-        height: u32,
-        block_hash: &U256,
-    ) {
+    fn on_new_block(&self, height: u32, block_hash: &U256) {
         self.p2p.on_new_block(height, block_hash)
     }
 }

@@ -9,7 +9,6 @@ use bitcoincore_rpc::bitcoin::hash_types::TxMerkleNode;
 
 use bitcoincore_rpc::bitcoin::{self, CompactTarget, Network, TxOut};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetBlockTemplateResult;
-use crypto_bigint::{Encoding, U256};
 use itertools::Itertools;
 use log::warn;
 
@@ -18,7 +17,7 @@ use crate::coins::bitcoin::Btc;
 use super::block::{Block, EncodeErrorP2P};
 use super::hard_config::GENERATION_GRAFFITI;
 use super::pplns::get_reward;
-use super::share::CoinabaseEncodedP2P;
+use super::share::CoinbaseEncodedP2P;
 // fn compare_outputs(o1: &TxOut, o2: &TxOut) -> bool {
 //     o1.value == o2.value && o1.script_pubkey == o2.script_pubkey
 // }
@@ -34,7 +33,7 @@ impl Block for bitcoin::block::Block {
     fn from_block_template(
         template: &GetBlockTemplateResult,
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
-        prev_p2p_share: U256,
+        cb_encoded: CoinbaseEncodedP2P,
     ) -> (Self, Vec<[u8; 32]>) {
         let output = vout
             .map(|(script, score)| TxOut {
@@ -48,7 +47,7 @@ impl Block for bitcoin::block::Block {
         // println!("Outputs: {:?}", output);
 
         let height = template.height;
-        let script_sig = generate_bitcoin_script(height, &prev_p2p_share.to_le_bytes());
+        let script_sig = generate_bitcoin_script(height, cb_encoded);
 
         let coinbase_tx = Transaction {
             version: bitcoin::transaction::Version(2),
@@ -145,7 +144,7 @@ impl Block for bitcoin::block::Block {
     }
 
     // must be called after consensus verified
-    fn deserialize_p2p_encoded(&self) -> Result<CoinabaseEncodedP2P, EncodeErrorP2P> {
+    fn deserialize_p2p_encoded(&self) -> Result<CoinbaseEncodedP2P, EncodeErrorP2P> {
         let mut prev_hash_push = self.txdata[0].input[0].script_sig.instructions();
         // height, must already be verified
         prev_hash_push.next();
@@ -153,10 +152,10 @@ impl Block for bitcoin::block::Block {
         if let Some(prev_hash_push) = prev_hash_push.next() {
             if let Ok(prev_hash_push) = prev_hash_push {
                 match prev_hash_push {
-                    bitcoin::script::Instruction::PushBytes(bytes) if bytes.len() == 32 => {
-                        return Ok(CoinabaseEncodedP2P {
-                            prev_hash: U256::from_le_slice(bytes.as_bytes()),
-                        })
+                    bitcoin::script::Instruction::PushBytes(bytes) => {
+                        if let Ok(k) = bincode::deserialize(bytes.as_bytes()) {
+                            return Ok(k);
+                        }
                     }
                     _ => {}
                 }
@@ -178,12 +177,12 @@ impl From<bitcoin::address::Error> for EncodeErrorP2P {
     }
 }
 
-fn generate_bitcoin_script(main_height: u64, prev_p2p_share: &[u8; 32]) -> ScriptBuf {
+fn generate_bitcoin_script(main_height: u64, encode: CoinbaseEncodedP2P) -> ScriptBuf {
     ScriptBuf::builder()
         .push_int(main_height as i64)
         // p2p encoded consensus
-        .push_slice(prev_p2p_share)
-        // nonce1 + nonce2
+        .push_slice(encode.bytes())
+        // placeholder nonce1 + nonce2
         .push_slice(&0u64.to_le_bytes())
         .push_slice(GENERATION_GRAFFITI)
         .into_script()
@@ -199,8 +198,7 @@ pub mod tests {
             block::Block,
             block_manager::{BlockManager, ProcessedShare},
             pplns::{ScoreChanges, WindowPPLNS},
-            ::{CoinabaseEncodedP2P, ShareP2P},
-            target_manager::TargetManager,
+            target_manager::TargetManager, share::ShareP2P,
         },
         stratum::header::BlockHeader,
     };

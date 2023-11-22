@@ -6,7 +6,7 @@ use super::{
 };
 
 // a share with this target will give exactly 1 score point
-pub static MAX_TARGET: U256 = U256::MAX.wrapping_div(&PPLNS_SHARE_UNITS_256);
+pub const MAX_TARGET: U256 = U256::MAX.wrapping_div(&PPLNS_SHARE_UNITS_256);
 
 // pub fn get_diff1_score(hash: &U256) -> Score {
 //     get_diff_score(hash, &DIFF1)

@@ -29,13 +29,16 @@ pub struct BlockVerifyContext {
 }
 
 pub struct BlockManager<C: Coin> {
-    blocks_dir: Box<Path>,
-    p2p_tip: Mutex<ShareP2P<C>>,
+    shares_dir: Box<Path>,
+    p2p_tip: Mutex<ProcessedShare<C>>,
     main_tip: Mutex<BlockVerifyContext>,
     current_height: AtomicU32,
+
+    round_start_height: AtomicU32,
+    round_num: AtomicU32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ProcessedShare<C: Coin> {
     pub inner: ShareP2P<C>,
     pub hash: U256,
@@ -48,6 +51,7 @@ impl<C: Coin> BlockManager<C> {
 
         let mut data_dir = data_dir.clone().to_path_buf();
         data_dir.push("shares");
+        let hash = genesis.block.get_header().get_hash();
 
         let blocks_dir = data_dir.into_boxed_path();
 
@@ -58,12 +62,19 @@ impl<C: Coin> BlockManager<C> {
         }
 
         Self {
-            blocks_dir,
+            shares_dir: blocks_dir,
             main_tip: Mutex::new(BlockVerifyContext {
                 hash: genesis.block.get_header().get_hash(),
             }),
-            p2p_tip: Mutex::new(genesis),
+            p2p_tip: Mutex::new(ProcessedShare {
+                inner: genesis,
+                hash,
+                // doesnt matter
+                score: 0,
+            }),
             current_height: AtomicU32::new(0),
+            round_start_height: AtomicU32::new(0),
+            round_num: AtomicU32::new(0),
         }
     }
 
@@ -100,7 +111,6 @@ impl<C: Coin> BlockManager<C> {
         })
     }
 
-    // TODO: save the hashes
     pub fn process_share(
         &self,
         block: C::BlockT,
@@ -111,13 +121,10 @@ impl<C: Coin> BlockManager<C> {
 
         let p2ptarget = p2ptarget.target();
 
-        if !block.verify_main_consensus(self.height()) {
-            return Err(ShareVerificationError::BadLinkMain);
-        }
-
+        
         let share: ShareP2P<C> = Self::decode_share(block, &window.address_scores)?;
-
-        let main_hash = self.main_tip.lock().unwrap().hash;
+        
+        let main_hash = self.main_tip().hash;
 
         // check mainnet link
         if share.block.get_header().get_prev() != main_hash {
@@ -126,12 +133,19 @@ impl<C: Coin> BlockManager<C> {
             return Err(ShareVerificationError::BadLinkMain);
         }
 
+        if !share.block.verify_main_consensus(self.height()) {
+            return Err(ShareVerificationError::BadLinkMain);
+        }
+
         // check p2p link
-        if share.encoded.prev_hash != p2p_tip.block.get_header().get_hash() {
+        if share.encoded.prev_hash != p2p_tip.hash
+            || share.encoded.height != p2p_tip.inner.encoded.height + 1
+            || share.encoded.round_num != p2p_tip.inner.encoded.round_num
+        {
             return Err(ShareVerificationError::BadLinkP2P);
         }
 
-        let hash: crypto_bigint::Uint<4> = share.block.get_header().get_hash();
+        let hash = share.block.get_header().get_hash();
         if &hash > p2ptarget {
             warn!(
                 "Insufficient diffiuclty: given {}, target: {}",
@@ -151,20 +165,33 @@ impl<C: Coin> BlockManager<C> {
             return Err(ShareVerificationError::BadRewards);
         }
 
-        *p2p_tip = share.clone();
-        info!("New p2p tip, score: {}, hash: {}", score, hash);
+        let _ = self.save_share(&share);
 
-        Ok(ProcessedShare {
+        let res = ProcessedShare {
             inner: share,
             score,
             hash,
-        })
+        };
+        *p2p_tip = res.clone();
+        info!("New p2p tip, score: {}, hash: {}", score, hash);
+        self.round_start_height
+            .store(self.round_start_height() + 1, Ordering::Relaxed);
+
+        Ok(res)
+    }
+
+    pub fn round_start_height(&self) -> u32 {
+        self.round_start_height.load(Ordering::Relaxed)
+    }
+
+    pub fn round_num(&self) -> u32 {
+        self.round_num.load(Ordering::Relaxed)
     }
 
     pub fn height(&self) -> u32 {
         self.current_height.load(Ordering::Relaxed)
     }
-    pub fn p2p_tip(&self) -> MutexGuard<ShareP2P<C>> {
+    pub fn p2p_tip(&self) -> MutexGuard<ProcessedShare<C>> {
         self.p2p_tip.lock().unwrap()
     }
 
@@ -186,17 +213,17 @@ impl<C: Coin> BlockManager<C> {
         );
     }
 
-    // fn save_share(&self, share: &ShareP2P<T>) -> std::io::Result<()> {
-    //     let path = self.get_block_path(share.);
+    fn save_share(&self, share: &ShareP2P<C>) -> std::io::Result<()> {
+        let path = self.get_share_path(share.encoded.height);
 
-    //     fs::File::create(path)?.write_all(&bincode::serialize(share).unwrap())
-    // }
+        fs::write(path, &bincode::serialize(&share.block).unwrap())
+    }
 
     fn load_share(&self, height: u32) -> std::io::Result<C::BlockT> {
-        let path = self.get_block_path(height);
+        let path = self.get_share_path(height);
 
         let mut bytes = Vec::new();
-        fs::File::create(path)?.read_to_end(&mut bytes)?;
+        fs::File::open(path)?.read_to_end(&mut bytes)?;
 
         match bincode::deserialize(&bytes) {
             Ok(k) => Ok(k),
@@ -207,16 +234,17 @@ impl<C: Coin> BlockManager<C> {
         }
     }
 
-    pub fn load_shares(&self) -> std::io::Result<Vec<C::BlockT>> {
+    pub fn load_shares(&self, from_height: u32, count: u8) -> std::io::Result<Vec<C::BlockT>> {
         let mut vec = Vec::new();
-        for i in 0..self.height() {
+        let to = (from_height + count as u32).min(self.height() + 1);
+        for i in from_height..to {
             vec.push(self.load_share(i)?);
         }
         Ok(vec)
     }
 
-    fn get_block_path(&self, height: u32) -> Box<Path> {
-        let mut path = self.blocks_dir.to_path_buf();
+    fn get_share_path(&self, height: u32) -> Box<Path> {
+        let mut path = self.shares_dir.to_path_buf();
         path.push(height.to_string());
         path.set_extension("dat");
         path.into_boxed_path()

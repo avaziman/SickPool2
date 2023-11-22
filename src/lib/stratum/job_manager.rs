@@ -4,7 +4,7 @@ use bitcoin::ScriptBuf;
 use crypto_bigint::U256;
 use log::info;
 
-use crate::{p2p::networking::block::Block, stratum::job::Job};
+use crate::{p2p::networking::{block::Block, share::CoinbaseEncodedP2P}, stratum::job::Job};
 
 use super::{header::BlockHeader, job::JobBtc, job_fetcher::BlockFetcher};
 
@@ -24,7 +24,7 @@ where
         let mut jobs = HashMap::with_capacity(16);
 
         // this is an invalid job, no outputs, a new one should be generated immediately
-        match header_fetcher.fetch_blocktemplate(std::iter::empty(), U256::ZERO) {
+        match header_fetcher.fetch_blocktemplate(std::iter::empty(), CoinbaseEncodedP2P::default()) {
             Ok(res) => {
                 let id = 0;
                 let job = JobBtc::new(id, res);
@@ -43,9 +43,9 @@ where
         &mut self,
         header_fetcher: &Fetcher,
         vout: impl Iterator<Item = (ScriptBuf, u64)>,
-        prev_p2p_share: U256,
+        cb_encoded: CoinbaseEncodedP2P,
     ) -> Result<Option<&JobBtc<bitcoin::Block, E>>, Fetcher::ErrorT> {
-        let fetched = header_fetcher.fetch_blocktemplate(vout, prev_p2p_share)?;
+        let fetched = header_fetcher.fetch_blocktemplate(vout, cb_encoded)?;
 
         if fetched
             .block

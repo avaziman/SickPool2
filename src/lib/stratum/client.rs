@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::{collections::{HashSet, HashMap}, net::SocketAddr};
 
 
 
@@ -8,6 +8,7 @@ use crate::{ server::Notifier};
 
 #[derive(Debug)]
 pub struct StratumClient {
+    pub address: SocketAddr,
     pub notifier: Notifier,
     pub extra_nonce: u32,
     pub authorized_workers: HashMap<String, String>,
@@ -17,14 +18,15 @@ pub struct StratumClient {
 }
 
 impl StratumClient {
-    pub fn new(notifier: Notifier, id: u32) -> StratumClient {
+    pub fn new(notifier: Notifier, id: u32, address: SocketAddr) -> StratumClient {
         StratumClient {
             notifier,
             extra_nonce: id,
             target: U256::ZERO,
             authorized_workers: HashMap::new(),
             submitted_shares: HashSet::new(),
-            subscription_key: None
+            subscription_key: None,
+            address,
         }
     }
 }

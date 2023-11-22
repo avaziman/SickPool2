@@ -2,7 +2,7 @@
 mod currency;
 
 use clap::{arg, command, ArgAction, Args, Parser, Subcommand};
-use crypto_bigint::U256;
+
 use log::info;
 use log4rs;
 
@@ -20,14 +20,12 @@ use sickpool2lib::stratum::header::BlockHeader;
 use sickpool2lib::stratum::server::StratumServer;
 use sickpool2lib::stratum::stratum_v1::StratumV1;
 
-
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::result::Result;
 
 use std::fs;
 use std::sync::Arc;
-
 
 extern crate sickpool2lib;
 
@@ -114,12 +112,11 @@ fn main() -> Result<(), String> {
         return Ok(());
     }
 
-    let p2p_cfg_path =
-        PathBuf::from_iter([&buf, &"config/p2p.json".parse().unwrap()].iter()).into_boxed_path();
+    let p2p_cfg_path = buf.join("config/p2p.json").into_boxed_path();
 
     let p2p_config: ProtocolServerConfig<ConfigP2P<bitcoin::Block>> =
         read_config(&p2p_cfg_path, || {
-            <Btc as Coin>::main_pool_config(p2p_cfg_path.clone())
+            <Btc as Coin>::main_pool_config(buf.into_boxed_path().clone())
         })?;
 
     info!("Stratum config: {:#?}", &stratum_config);
@@ -190,7 +187,10 @@ fn create_pool(
         stratum_server.process_stratum();
 
         let tip = p2p_protocol.block_manager.p2p_tip();
-        if tip.encoded.prev_hash != U256::ZERO {
+        let tip = &tip.inner;
+        
+        let encoded_height = tip.encoded.height;
+        if encoded_height > 0 {
             let genesis = tip.block.clone();
             info!(
                 "Found genesis block for new pool: {}, {:#?}",
@@ -198,7 +198,7 @@ fn create_pool(
                 genesis,
             );
 
-            new_config.consensus.genesis_share = genesis;
+            new_config.consensus.genesis_block = genesis;
 
             let pool_hash = new_config.consensus.pool_id();
             info!("Pool hash: {}", pool_hash);
