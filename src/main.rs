@@ -200,7 +200,7 @@ fn create_pool(
 
             new_config.consensus.genesis_block = genesis;
 
-            let pool_hash = new_config.consensus.pool_id();
+            let pool_hash = new_config.consensus.pool_hash();
             info!("Pool hash: {}", pool_hash);
 
             let mut pool_path = data_dir.clone();

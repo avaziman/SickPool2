@@ -27,17 +27,12 @@ where
 {
     match job {
         Some(job) => {
-            job.update_fields(&params);
-
+            job.update_fields(&params); 
             let hash = job.block.get_header().get_hash();
 
-            let low = hash.as_words()[0];
-
-            if client.submitted_shares.contains(&low) {
+            if client.submitted_shares.did_contain(&hash) {
                 return ShareResult::Duplicate();
             }
-
-            client.submitted_shares.insert(low);
 
             // log::info!("Hash {:x}", hash);
 

@@ -5,11 +5,12 @@ use log::{info, warn};
 
 use crate::{
     coins::coin::Coin,
-    p2p::networking::{difficulty::MAX_TARGET, hard_config::MAX_RETARGET_FACTOR},
+    p2p::networking::{difficulty::MAX_TARGET, hard_config::MAX_RETARGET_FACTOR, block::Block},
     stratum::header::BlockHeader,
 };
 
-use super::{block::Block, config::ConsensusConfigP2P};
+use super::consensus::ConsensusConfigP2P;
+
 
 struct Adjustment {
     time: u32,

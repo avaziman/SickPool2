@@ -1,11 +1,11 @@
 use crypto_bigint::U256;
 use serde::{Deserialize, Serialize};
 
-use crate::config::ProtocolServerConfig;
+use crate::{config::ProtocolServerConfig, p2p::consensus::consensus::ConsensusConfigP2P};
 
 use super::{
     block::{Block, EncodeErrorP2P},
-    config::{ConfigP2P, ConsensusConfigP2P},
+    config::{ConfigP2P},
     hard_config::CURRENT_VERSION,
 };
 
@@ -49,7 +49,7 @@ impl Hello {
         Self {
             version: CURRENT_VERSION,
             listening_port: port,
-            pool_consensus_hash: consensus.pool_id(),
+            pool_consensus_hash: consensus.pool_hash(),
         }
     }
 }

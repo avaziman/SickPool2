@@ -17,13 +17,12 @@ use crate::{
     address::Address,
     protocol::Protocol,
     server::{respond, Notifier},
-    stratum::{client::StratumClient, job_fetcher::BlockFetcher},
+    stratum::{client::StratumClient, job_fetcher::BlockFetcher}, p2p::consensus::{consensus::ConsensusConfigP2P, block_manager::BlockManager, target_manager::TargetManager},
 };
 
 use super::{
     block::Block,
-    block_manager::BlockManager,
-    config::{ConfigP2P, ConsensusConfigP2P},
+    config::{ConfigP2P},
     difficulty,
     hard_config::{CURRENT_VERSION, DEV_ADDRESS_BTC_STR, OLDEST_COMPATIBLE_VERSION},
     messages::*,
@@ -31,7 +30,6 @@ use super::{
     peer_manager::PeerManager,
     pplns::{self, ScoreChanges, WindowPPLNS},
     share::{CoinbaseEncodedP2P, ShareP2P},
-    target_manager::TargetManager,
     utils::time_now_ms,
 };
 use crate::coins::coin::Coin;
@@ -75,7 +73,7 @@ impl<C: Coin> Protocol for ProtocolP2P<C> {
             hello_message: Messages::Hello(Hello::new(conf.listening_port, &conf.consensus)),
             target_manager: Mutex::new(TargetManager::new::<C>(
                 &conf.consensus,
-                Duration::from_millis(conf.consensus.block_time_ms),
+                Duration::from_millis(conf.consensus.block_time_ms as u64),
                 conf.consensus.diff_adjust_blocks,
             )),
             block_manager: BlockManager::new(genesis_share, conf.data_dir.clone()),
@@ -167,11 +165,12 @@ impl<C: Coin> ProtocolP2P<C> {
             // .expect("Failed to get block")
             .block;
 
+            let block_time_ms = block_time_ms as u32;
         ConfigP2P {
             max_peer_connections: 32,
             consensus: ConsensusConfigP2P {
                 name: pool_name,
-                parent_pool_id: U256::ZERO,
+                parent_pool_hash: U256::ZERO,
                 block_time_ms,
                 diff_adjust_blocks: 16,
                 genesis_block: block,

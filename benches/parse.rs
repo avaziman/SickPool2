@@ -11,8 +11,7 @@ extern crate sickpool2lib;
 // use SickPool2::stratum::stratum_server::;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let reqs = r#"{"params": ["slush.miner1", "000000bf", "00000001", "504e86ed", "b2957c02"], "id": 4, "method": "mining.submit"}"#;
-    let req = String::from(reqs);
+    let req = r#"{"params": ["slush.miner1", "000000bf", "00000001", "504e86ed", "b2957c02"], "id": 4, "method": "mining.submit"}"#;
 
     c.bench_function("parse", move |b| {
         b.iter(|| {

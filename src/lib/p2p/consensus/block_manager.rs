@@ -8,19 +8,19 @@ use std::sync::{Mutex, MutexGuard};
 use std::{fs, path::Path};
 
 use crate::coins::coin::Coin;
+use crate::p2p::networking::block::Block;
 use crate::p2p::networking::difficulty::get_diff_score;
 use crate::p2p::networking::pplns::ScoreChanges;
+use crate::p2p::networking::share::ShareP2P;
 use crate::stratum::header::BlockHeader;
 use crypto_bigint::U256;
 use log::{info, warn};
 
-use super::block::EncodeErrorP2P;
+use crate::p2p::networking::block::EncodeErrorP2P;
 
-use super::messages::ShareVerificationError;
-use super::pplns::{self, Score, WindowPPLNS};
+use crate::p2p::networking::messages::ShareVerificationError;
+use crate::p2p::networking::pplns::{self, Score, WindowPPLNS};
 
-use super::block::Block;
-use super::share::ShareP2P;
 use super::target_manager::TargetManager;
 
 // we don't need the entire block for verification...

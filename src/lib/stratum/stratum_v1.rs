@@ -52,8 +52,11 @@ use super::{
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum StratumRequestsBtc {
+    #[serde(rename="mining.submit")]
     Submit(SubmitReqParams),
+    #[serde(rename="mining.subscribe")]
     Subscribe,
+    #[serde(rename="mining.authorize")]
     Authorize(AuthorizeReqParams),
 }
 
@@ -79,7 +82,7 @@ pub struct SubmitReqParams {
 #[repr(u32)]
 #[derive(Debug)]
 pub enum StratumV1ErrorCodes {
-    Unknown(String) = 20,
+    Other(String) = 20,
     JobNotFound = 21,
     DuplicateShare = 22,
     LowDifficultyShare = 23,
@@ -100,7 +103,7 @@ impl Discriminant for StratumV1ErrorCodes {
 impl fmt::Display for StratumV1ErrorCodes {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            StratumV1ErrorCodes::Unknown(reason) => write!(f, "{}", reason),
+            StratumV1ErrorCodes::Other(reason) => write!(f, "{}", reason),
             StratumV1ErrorCodes::JobNotFound => write!(f, "Job not found"),
             StratumV1ErrorCodes::DuplicateShare => write!(f, "Duplicate share"),
             StratumV1ErrorCodes::LowDifficultyShare => write!(f, "Low difficulty share"),
@@ -158,7 +161,7 @@ impl StratumV1 {
                 let _pk = match MyBtcAddr::from_string(&params.username) {
                     Ok(k) => k,
                     Err(_) => {
-                        return Err(StratumV1ErrorCodes::Unknown(String::from(
+                        return Err(StratumV1ErrorCodes::Other(String::from(
                             "Invalid address provided",
                         )));
                     }
@@ -248,17 +251,9 @@ impl StratumV1 {
         method: String,
         params: Value,
     ) -> Result<StratumRequestsBtc, serde_json::Error> {
-        match method.as_ref() {
-            "mining.submit" => Ok(StratumRequestsBtc::Submit(serde_json::from_value(params)?)),
-            "mining.authorize" => Ok(StratumRequestsBtc::Authorize(serde_json::from_value(
-                params,
-            )?)),
-            "mining.subscribe" => Ok(StratumRequestsBtc::Subscribe),
-            unknown => Err(serde::de::Error::custom(format!(
-                "Unknown method: {}",
-                unknown
-            ))),
-        }
+        let obj = Value::Object(serde_json::Map::from_iter([(method, params)]));
+
+        serde_json::from_value(obj)
     }
 }
 
@@ -386,7 +381,7 @@ impl Protocol for StratumV1 {
             Ok(stratum_req) => self.process_stratum_request(stratum_req, ctx, ptx),
             Err(e) => {
                 warn!("Failed to parse stratum request: {}", e);
-                return Err(StratumV1ErrorCodes::Unknown(format!(
+                return Err(StratumV1ErrorCodes::Other(format!(
                     "Failed to parse stratum request: {}",
                     e
                 )));
@@ -401,8 +396,8 @@ impl Protocol for StratumV1 {
     }
 
     fn delete_client(&self, ctx: Arc<Mutex<Self::ClientContext>>) {
-        let lock = ctx.lock().unwrap();
-        if let Some(subkey) = lock.subscription_key {
+        let mut lock = ctx.lock().unwrap();
+        if let Some(subkey) = lock.subscription_key.take() {
             self.subscribed_clients.lock().unwrap().remove(subkey);
         }
 

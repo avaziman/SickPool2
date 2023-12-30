@@ -6,11 +6,10 @@ use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{address::Address, coins::coin::Coin};
+use crate::{address::Address, coins::coin::Coin, p2p::consensus::block_manager::ProcessedShare};
 
 use super::{
     block::EncodeErrorP2P,
-    block_manager::ProcessedShare,
     hard_config::{DEV_ADDRESS_BTC_STR, PPLNS_DIFF_MULTIPLIER, PPLNS_SHARE_UNITS},
     share::ShareP2P,
 };

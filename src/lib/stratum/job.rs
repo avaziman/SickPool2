@@ -19,6 +19,7 @@ use super::{header::BlockHeader, job_fetcher::BlockFetch, stratum_v1::SubmitReqP
 
 pub trait Job<T, E>: Clone + std::fmt::Debug {
     type SubmitParams;
+    // in job and not block because of merkle steps
     fn update_fields(&mut self, params: &Self::SubmitParams);
 
     fn get_broadcast_message(id: u32, fetch: &BlockFetch<T>, merkle_steps: &Vec<[u8; 32]>) -> E;

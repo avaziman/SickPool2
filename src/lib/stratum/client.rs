@@ -4,7 +4,7 @@ use std::{collections::{HashSet, HashMap}, net::SocketAddr};
 
 use crypto_bigint::U256;
 
-use crate::{ server::Notifier};
+use crate::{server::Notifier, p2p::duplicate_checker::DuplicateHashChecker};
 
 #[derive(Debug)]
 pub struct StratumClient {
@@ -12,7 +12,7 @@ pub struct StratumClient {
     pub notifier: Notifier,
     pub extra_nonce: u32,
     pub authorized_workers: HashMap<String, String>,
-    pub submitted_shares: HashSet<u64>,
+    pub submitted_shares: DuplicateHashChecker,
     pub target: U256,
     pub subscription_key: Option<usize>
 }
@@ -24,7 +24,7 @@ impl StratumClient {
             extra_nonce: id,
             target: U256::ZERO,
             authorized_workers: HashMap::new(),
-            submitted_shares: HashSet::new(),
+            submitted_shares: DuplicateHashChecker::default(),
             subscription_key: None,
             address,
         }

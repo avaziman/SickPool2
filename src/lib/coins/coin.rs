@@ -10,11 +10,11 @@ use crypto_bigint::U256;
 use crate::{
     address::Address,
     config::{ProtocolServerConfig, ServerConfig},
-    p2p::networking::{
+    p2p::{networking::{
         block::Block,
-        config::{ConfigP2P, ConsensusConfigP2P},
+        config::{ConfigP2P},
         protocol::ProtocolP2P,
-    },
+    }, consensus::consensus::ConsensusConfigP2P},
     stratum::{config::StratumConfig, job_fetcher::BlockFetcher},
 };
 

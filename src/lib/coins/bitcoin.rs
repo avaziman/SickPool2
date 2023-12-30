@@ -4,7 +4,8 @@ use bitcoin::{address::NetworkUnchecked, Network};
 use crypto_bigint::U256;
 use serde::{Deserialize, Serialize};
 
-use crate::p2p::networking::config::ConsensusConfigP2P;
+
+use crate::p2p::consensus::consensus::ConsensusConfigP2P;
 
 use super::coin::Coin;
 
@@ -32,8 +33,8 @@ impl Coin for Btc {
 
     fn main_pool_consensus_config() -> ConsensusConfigP2P<Self::BlockT> {
         ConsensusConfigP2P {
-            parent_pool_id: U256::ZERO,
-            block_time_ms: Duration::from_secs(10).as_millis() as u64,
+            parent_pool_hash: U256::ZERO,
+            block_time_ms: Duration::from_secs(10).as_millis() as u32,
             diff_adjust_blocks: 16,
             genesis_block: bitcoin::blockdata::constants::genesis_block(Network::Bitcoin),
             password: None,
